@@ -1,0 +1,9 @@
+{
+    "rust-analyzer.linkedProjects": [
+
+    ],
+    "rust-analyzer.cargo.features": [
+       "server", 
+       "web" 
+    ]
+}
