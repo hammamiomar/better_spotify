@@ -7,13 +7,13 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-dioxus = { version = "0.6.0", features = ["fullstack","router"] }
+dioxus = { version = "0.6.2", features = ["fullstack","router"] }
 axum = { version = "0.7.0", optional = true }
 tokio = { version = "1.0", features = ["full"], optional = true }
 dioxus-cli-config = { version = "*", optional = true }
 dotenvy = {version = "0.15.7", optional = true}
-reqwest = { version = "0.12.15", features = ["json"],optional = true }
-serde = { version = "1.0.219", features = ["derive"],optional = true }
+reqwest = { version = "0.12.15", features = ["json"]}
+serde = { version = "1.0.219", features = ["derive"] }
 serde_json = { version = "1.0", optional = true }
 rand = {version = "0.8.0", optional = true}
 sha2 = {version = "0.10.9", optional = true}
@@ -28,8 +28,6 @@ dioxus-logger = "0.6.2"
 server = ["dioxus/server",
     "dep:axum", 
     "dep:tokio",
-    "dep:reqwest",
-    "dep:serde",
     "dep:serde_json",
     "dep:dotenvy",
     "dep:rand",

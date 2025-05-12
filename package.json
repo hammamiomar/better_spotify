@@ -1,0 +1,28 @@
+{
+  "name": "betterd_spotify",
+  "version": "1.0.0",
+  "description": "Your new bare-bones project includes minimal organization with a single `main.rs` file and a few assets.",
+  "main": "postcss.config.js",
+  "scripts": {
+    "build:css": "npx @tailwindcss/cli -i ./input.css -o ./assets/tailwind.css",
+    "watch:css": "npx @tailwindcss/cli -i ./input.css -o ./assets/tailwind.css --watch"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hammamiomar/better_spotify.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/hammamiomar/better_spotify/issues"
+  },
+  "homepage": "https://github.com/hammamiomar/better_spotify#readme",
+  "devDependencies": {
+    "tailwindcss": "^4.1.6"
+  },
+  "dependencies": {
+    "@tailwindcss/cli": "^4.1.6"
+  }
+}

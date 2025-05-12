@@ -8,9 +8,13 @@ mod routes;
 mod server;
 #[cfg(feature = "server")]
 mod auth;
+pub mod api;
+pub mod api_models;
 
 use crate::components::layout::*;
 use crate::routes::pages::*;
+
+static CSS: Asset = asset!("/assets/tailwind.css");
 
 // The entry point for the server
 #[cfg(feature = "server")]
@@ -32,7 +36,10 @@ fn App() -> Element {
     use_context_provider(|| Signal::new(false));
     
     rsx! {
-      Router::<Route>{ }
+        document::Stylesheet { href:CSS}
+        div{ class:"min-h-screen bg-gray-900 text-gray-100 flex flex-col",
+            Router::<Route>{ }
+        }
     }
 }
 

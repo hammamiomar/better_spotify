@@ -1,29 +1,38 @@
-use std::env;
+use std::{env, sync::RwLock};
 use anyhow::Result;
-use axum::{response::Redirect, routing::get};
+use axum::{response::Redirect, routing::get, extract::State as AxumState};
 use dioxus::prelude::*;
 use dioxus_logger;
 use dotenvy::dotenv;
-use std::{collections::HashMap, sync::Mutex};
+use std::{collections::HashMap, sync::{Mutex,Arc}};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use lazy_static::lazy_static;
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use serde::Deserialize;
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 
-use crate::App;
+use crate::{api_models::SpotifyTokenResponse, App};
 use crate::auth::pkce;
 
-lazy_static!{
-    static ref PKCE_VERIFIERS: Mutex<HashMap<String,String>> = Mutex::new(HashMap::new());
+
+#[derive(Clone)]
+pub struct AppState{
+    pub pkce_verifiers : Arc<Mutex<HashMap<String, String>>>,
+    pub current_user_tokens: Arc<RwLock<Option<SpotifyTokenResponse>>>
 }
 
-lazy_static!{
-    static ref CURRENT_USER_TOKEN: Mutex<Option<SpotifyTokenResponse>> = Mutex::new(None);
+impl AppState{
+    pub fn new() -> Self{
+        Self{
+            pkce_verifiers: Arc::new(Mutex::new(HashMap::new())),
+            current_user_tokens: Arc::new(RwLock::new(None))
+        }
+    }
 }
 
-
+#[cfg(feature = "server")]
 pub async fn start_server() -> Result<()> {
+    use std::any::Any;
+
 
     dotenv().ok();
 
@@ -32,12 +41,23 @@ pub async fn start_server() -> Result<()> {
     let client_id = env::var("SPOTIFY_CLIENT_ID")
         .expect("SPOTIFY_CLIENT_ID must be set in .env");
 
-    let address = dioxus::cli_config::fullstack_address_or_localhost();
+    let app_state = (AppState::new());
+
+    let provider = {
+        let shared = app_state.clone();
+        move || Box::new(shared.clone()) as Box<dyn Any>
+    };
+
+    let cfg = ServeConfigBuilder::default()
+        .context_providers(Arc::new(vec![Box::new(provider)]));
+
+     let address = dioxus::cli_config::fullstack_address_or_localhost();
 
     let axum_router = axum::Router::new()
         .route("/login", get(spotify_login_handler))
         .route("/callback", get(spotify_callback_handler))
-        .serve_dioxus_application(ServeConfigBuilder::new(),App);
+        .serve_dioxus_application(cfg,App)
+        .with_state(app_state.clone());
 
     let listener = tokio::net::TcpListener::bind(address).await?;
     axum::serve(listener, axum_router.into_make_service())
@@ -46,7 +66,9 @@ pub async fn start_server() -> Result<()> {
     Ok(())
 }
 
-async fn spotify_login_handler() -> Redirect{
+async fn spotify_login_handler(
+    AxumState(app_state):AxumState<AppState>,
+) -> Redirect{
 
     let client_id = env::var("SPOTIFY_CLIENT_ID")
         .expect("sptify client id must be set");
@@ -66,7 +88,12 @@ async fn spotify_login_handler() -> Redirect{
 
     //stroing code verifier temporarily
 
-    PKCE_VERIFIERS.lock().unwrap().insert(state.clone(), code_verifier);
+    app_state
+        .pkce_verifiers
+        .lock()
+        .unwrap()
+        .insert(state.clone(), code_verifier);
+    
     tracing::info!("Stored verifier for state:{}",state);
 
     let scope = "playlist-read-private playlist-read-collaborative 
@@ -89,16 +116,10 @@ async fn spotify_login_handler() -> Redirect{
     Redirect::temporary(auth_url.as_str())
 }
 
-#[derive(Deserialize, Debug)]
-struct SpotifyTokenResponse{
-    access_token:String,
-    token_type:String,
-    scope:String,
-    expires_in: u64,
-    refresh_token : Option<String>,
-}
+
 
 async fn spotify_callback_handler(
+    AxumState(app_state):AxumState<AppState>,
     query: axum::extract::Query<std::collections::HashMap<String,String>>,
 ) -> Redirect{
     // query will either respond with  code and state, or error and state
@@ -122,7 +143,7 @@ async fn spotify_callback_handler(
     // get code verifier and match state, for CSRF protection
 
     let code_verifier = {
-        let mut verifiers = PKCE_VERIFIERS.lock().unwrap();
+        let mut verifiers = app_state.pkce_verifiers.lock().unwrap();
 
         match verifiers.remove(&received_state){
             Some(v) => v,
@@ -176,7 +197,7 @@ async fn spotify_callback_handler(
 
                         //TODO Change AS its only for solo dev
 
-                        *CURRENT_USER_TOKEN.lock().unwrap() = Some(token_reponse);
+                        *app_state.current_user_tokens.write().unwrap() = Some(token_reponse);
 
                         Redirect::temporary("/")
                     }
