@@ -21,13 +21,17 @@ pub fn NavBar() -> Element {
 
                     match has_token.read().as_ref(){
                         Some(Err(e)) =>rsx!{li {Link {to:Route::LoginPage {  }, "Login"}} },
-                        _ => rsx!{}
+                        _ => rsx!{li {Link {to:Route::ShufflePage{  }, "Shuffle"}}}
                     }
                 }
             }
         }
         main { class: "flex-grow container mx-auto p-4",
-            Outlet::<Route>{}
+            SuspenseBoundary { 
+                fallback: |_| rsx!{LoadingSpinner{}},
+                Outlet::<Route>{}
+            }
+            
         }
         Footer {  }
     }
@@ -41,6 +45,25 @@ pub fn Footer() -> Element {
             p {
                 "© 2025 BetterdSpotify - Created by "
                 a { href: "https://hammamiomar.xyz", target: "_blank", rel: "noopener noreferrer", class: "text-green-400 hover:underline", "Omar Hammami" }
+            }
+        }
+    }
+
+    
+}
+
+#[component]
+fn LoadingSpinner() -> Element {
+    rsx! {
+        div {
+            class: "flex flex-col items-center justify-center p-8 text-center", // Centered
+            // You can use an actual SVG spinner or a simple animation
+            div {
+                class: "animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-green-500",
+            }
+            p {
+                class: "mt-4 text-xl text-gray-300",
+                "Fetching..."
             }
         }
     }

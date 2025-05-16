@@ -51,6 +51,8 @@ enum Route {
     Home {},
     #[route("/login")]
     LoginPage {},
+    #[route("/shuffle")]
+    ShufflePage{},
     #[route("/callback")]
     CallBack{},
 }

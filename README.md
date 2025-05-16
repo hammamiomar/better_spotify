@@ -7,3 +7,8 @@ dx serve --platform web
 npm run watch:css
 ```
 
+TODO:
+ - api.rs pagination for playlist tracks
+ - get all tracks from playlist
+ - :
+

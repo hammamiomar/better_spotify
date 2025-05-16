@@ -1,9 +1,9 @@
+use crate::api_models::{SpotifyPlaylistItem, SpotifyPlaylistsResponse, SpotifyUserProfile};
 use dioxus::prelude::*;
-use crate::api_models::{SpotifyPlaylistsResponse, SpotifyUserProfile};
 
 #[component]
-pub fn ProfileView(profile: SpotifyUserProfile) -> Element{
-   rsx! {
+pub fn ProfileView(profile: SpotifyUserProfile) -> Element {
+    rsx! {
         div {
             id: "user-profile-details",
             class: "flex items-center space-x-3", // Layout for image and text
@@ -18,7 +18,7 @@ pub fn ProfileView(profile: SpotifyUserProfile) -> Element{
                     div { class: "w-16 h-16 rounded-full bg-gray-700 flex items-center justify-center text-gray-400", "No Pic"}
                 }
             } else {
-                div { class: "w-16 h-16 rounded-full bg-gray-700 flex items-center justify-center text-gray-400", "No Pic"} 
+                div { class: "w-16 h-16 rounded-full bg-gray-700 flex items-center justify-center text-gray-400", "No Pic"}
             }
             div {
                 p { class: "text-xl text-gray-100", "Welcome, {profile.display_name}!" }
@@ -29,16 +29,16 @@ pub fn ProfileView(profile: SpotifyUserProfile) -> Element{
 }
 
 #[component]
-pub fn PlaylistsView(playlists: SpotifyPlaylistsResponse) -> Element{
+pub fn PlaylistsView(playlists: Vec<SpotifyPlaylistItem>) -> Element {
     rsx! {
         div {
             id: "playlist-list-details",
-            if playlists.items.is_empty() {
-                p { class: "text-gray-400", "You have no playlists." } 
+            if playlists.is_empty() {
+                p { class: "text-gray-400", "You have no playlists." }
             } else {
                 ul {
                     class: "space-y-3", // Adds space between playlist items
-                    for playlist_item in &playlists.items {
+                    for playlist_item in &playlists {
                         li {
                             key: "{playlist_item.id}",
                             class: "bg-gray-700 p-3 rounded-md shadow flex items-center justify-between hover:bg-gray-600 transition-colors",
@@ -52,10 +52,10 @@ pub fn PlaylistsView(playlists: SpotifyPlaylistsResponse) -> Element{
                                             class: "w-12 h-12 object-cover rounded"
                                         }
                                     } else {
-                                        div { class: "w-12 h-12 bg-gray-600 rounded flex items-center justify-center text-xs text-gray-400", "No Art"} 
+                                        div { class: "w-12 h-12 bg-gray-600 rounded flex items-center justify-center text-xs text-gray-400", "No Art"}
                                     }
                                 } else {
-                                    div { class: "w-12 h-12 bg-gray-600 rounded flex items-center justify-center text-xs text-gray-400", "No Art"} 
+                                    div { class: "w-12 h-12 bg-gray-600 rounded flex items-center justify-center text-xs text-gray-400", "No Art"}
                                 }
                                 div {
                                     p { class: "font-semibold text-gray-100", "{playlist_item.name}" }

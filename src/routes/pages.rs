@@ -1,18 +1,55 @@
 use dioxus::prelude::*;
-use crate::api::{get_spotify_user_playlists, get_spotify_user_profile};
-use crate::api_models::{SpotifyPlaylistsResponse, SpotifyUserProfile};
+use crate::api::{get_spotify_user_playlists_all, get_spotify_user_profile};
+use crate::api_models::{SpotifyPlaylistItem, SpotifyPlaylistsResponse, SpotifyUserProfile};
 use crate::components::spotify::{PlaylistsView, ProfileView};
+
+#[component]
+pub fn ShufflePage() -> Element{
+    let playlists_resource : Resource<Result<Vec<SpotifyPlaylistItem>,ServerFnError>> = use_server_future(|| async{
+    get_spotify_user_playlists_all().await})?;
+
+    rsx!{
+        div {class:"space-y-6",
+            div { // Welcome section
+                    class: "bg-gray-800 p-6 rounded-lg shadow-lg",
+                    h1 { class: "text-3xl font-bold text-green-400 mb-2",
+                        "Select a playlist to shuffle"
+                    }
+                    p { class: "text-lg text-gray-300", "True RNG shuffle..." }
+                }
+        // --- Playlists Section ---
+            div {
+                id: "playlists-section",
+                class: "bg-gray-800 p-6 rounded-lg shadow-lg",
+                h2 { class: "text-2xl font-semibold text-green-300 mb-3", "Your Playlists" }
+                // Match block as before
+                {
+                    match playlists_resource.read().as_ref() {
+                        Some(Ok(playlist_data)) => {
+                            rsx! { PlaylistsView { playlists: playlist_data.clone() } }
+                        }
+                        Some(Err(e)) => {
+                            rsx! { p { class: "text-red-400", "Error loading playlists: {e}" } }
+                        }
+                        None => {
+                            rsx! { p { class: "text-yellow-400", "Loading playlists..." } }
+                        }
+                    }
+                }
+            }
+        }
+        
+    }
+}
 
 #[component]
 pub fn Home() -> Element {
     let profile_resource: Resource<Result<SpotifyUserProfile, ServerFnError>> = use_server_future( || async {
         get_spotify_user_profile().await})?;
-    let playlists_resource : Resource<Result<SpotifyPlaylistsResponse,ServerFnError>> = use_server_future(|| async{
-        get_spotify_user_playlists().await})?;
+
 
     rsx! {
-        div { // Add a wrapper for specific page styling if needed
-            class: "space-y-6", // Adds space between child elements
+        div {class: "space-y-6", 
 
             div { // Welcome section
                 class: "bg-gray-800 p-6 rounded-lg shadow-lg",
@@ -35,28 +72,7 @@ pub fn Home() -> Element {
                         None => rsx! { p { class: "text-yellow-400", "Loading profile..." } }
                     }
                 }
-            }
-
-            // --- Playlists Section ---
-            div {
-                id: "playlists-section",
-                class: "bg-gray-800 p-6 rounded-lg shadow-lg",
-                h2 { class: "text-2xl font-semibold text-green-300 mb-3", "Your Playlists" }
-                // Match block as before
-                {
-                    match playlists_resource.read().as_ref() {
-                        Some(Ok(playlist_data)) => {
-                            rsx! { PlaylistsView { playlists: playlist_data.clone() } }
-                        }
-                        Some(Err(e)) => {
-                            rsx! { p { class: "text-red-400", "Error loading playlists: {e}" } }
-                        }
-                        None => {
-                            rsx! { p { class: "text-yellow-400", "Loading playlists..." } }
-                        }
-                    }
-                }
-            }
+            }  
         }
     }
 }
