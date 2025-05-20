@@ -28,6 +28,12 @@ async fn main() {
 // For any other platform, we just launch the app
 #[cfg(not(feature = "server"))]
 fn main() {
+     wasm_logger::init(wasm_logger::Config::default());
+    // If using console_log and console_error_panic_hook:
+    // std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+    // console_log::init_with_level(log::Level::Info).expect("Failed to init console_log");
+
+    log::info!("Dioxus client application started"); 
     dioxus::launch(App);
 }
 
@@ -53,6 +59,8 @@ enum Route {
     LoginPage {},
     #[route("/shuffle")]
     ShufflePage{},
+    #[route("/shuffle/:playlist_id/:playlist_name")]
+    ShuffleActionPage{playlist_id:String, playlist_name: String},
     #[route("/callback")]
     CallBack{},
 }

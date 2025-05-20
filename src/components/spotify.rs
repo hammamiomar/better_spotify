@@ -1,5 +1,6 @@
-use crate::api_models::{SpotifyPlaylistItem, SpotifyPlaylistsResponse, SpotifyUserProfile};
+use crate::api_models::{SpotifyPlaylistItem, SpotifyUserProfile};
 use dioxus::prelude::*;
+use log::info;
 
 #[component]
 pub fn ProfileView(profile: SpotifyUserProfile) -> Element {
@@ -28,53 +29,75 @@ pub fn ProfileView(profile: SpotifyUserProfile) -> Element {
     }
 }
 
+
 #[component]
-pub fn PlaylistsView(playlists: Vec<SpotifyPlaylistItem>) -> Element {
+pub fn PlaylistsView(playlists: Vec<SpotifyPlaylistItem>, selected_playlist: Signal<Option<SpotifyPlaylistItem>>) -> Element {
+    let currently_selected_id_opt: Option<String> = selected_playlist
+        .read()
+        .as_ref()
+        .map(|p| p.id.clone());
+
     rsx! {
         div {
             id: "playlist-list-details",
-            if playlists.is_empty() {
-                p { class: "text-gray-400", "You have no playlists." }
-            } else {
                 ul {
-                    class: "space-y-3", // Adds space between playlist items
-                    for playlist_item in &playlists {
-                        li {
-                            key: "{playlist_item.id}",
-                            class: "bg-gray-700 p-3 rounded-md shadow flex items-center justify-between hover:bg-gray-600 transition-colors",
-                            div { // For image and name/description
-                                class: "flex items-center space-x-3",
-                                if let Some(images) = &playlist_item.images {
-                                    if let Some(image) = images.first() {
-                                        img {
-                                            src: "{image.url}",
-                                            alt: "{playlist_item.name} cover",
-                                            class: "w-12 h-12 object-cover rounded"
+                    class: "space-y-2 max-h-96 overflow-y-auto",
+                    if playlists.is_empty(){
+                        li{class: "text-gray-400 p-3 text-center", "No playlists to display"}
+                    }else{
+                        {playlists.iter().map(|playlist_item| {
+                            let is_selected = match &currently_selected_id_opt {
+                                Some(selected_id_str) => &playlist_item.id == selected_id_str,
+                                None => false,
+                            };
+
+                            let item_classes = if is_selected {
+                                "bg-green-700 p-3 rounded-md shadow flex items-center justify-between transition-colors cursor-pointer"
+                            } else {
+                                "bg-gray-700 p-3 rounded-md shadow flex items-center justify-between hover:bg-gray-600 transition-colors cursor-pointer"
+                            };
+
+                            let item_for_click_closure = playlist_item.clone();
+                            let mut signal_for_click_closure = selected_playlist;
+
+                            rsx! {
+                                li {
+                                    key: "{playlist_item.id}",
+                                    class: "{item_classes}",
+                                    onclick: move |_| {
+                                        //log::info!("clicked playlistL{}",item_for_click_closure.id);
+                                        signal_for_click_closure.set(Some(item_for_click_closure.clone()));
+                                    },
+                                    div { // For image and name/description
+                                        class: "flex items-center space-x-3",
+                                        if let Some(images) = &playlist_item.images {
+                                            if let Some(image) = images.first() {
+                                                img {
+                                                    src: "{image.url}",
+                                                    alt: "{playlist_item.name} cover",
+                                                    class: "w-12 h-12 object-cover rounded"
+                                                }
+                                            } else {
+                                                div { class: "w-12 h-12 bg-gray-600 rounded flex items-center justify-center text-xs text-gray-400", "No Art"}
+                                            }
+                                        } else {
+                                            div { class: "w-12 h-12 bg-gray-600 rounded flex items-center justify-center text-xs text-gray-400", "No Art"}
                                         }
-                                    } else {
-                                        div { class: "w-12 h-12 bg-gray-600 rounded flex items-center justify-center text-xs text-gray-400", "No Art"}
-                                    }
-                                } else {
-                                    div { class: "w-12 h-12 bg-gray-600 rounded flex items-center justify-center text-xs text-gray-400", "No Art"}
-                                }
-                                div {
-                                    p { class: "font-semibold text-gray-100", "{playlist_item.name}" }
-                                    if let Some(desc) = &playlist_item.description {
-                                        if !desc.is_empty() { // Only show if description exists and is not empty
-                                            p { class: "text-xs text-gray-400 truncate w-64", "{desc}" } // Truncate long descriptions
+                                        div {
+                                            p { class: "font-semibold text-gray-100", "{playlist_item.name}" }
+                                            if let Some(desc) = &playlist_item.description {
+                                                if !desc.is_empty() { 
+                                                    p { class: "text-xs text-gray-400 truncate w-64", "{desc}" } 
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             }
-                            // Link {
-                            //     to: Route::ShufflePage { playlist_id: playlist_item.id.clone() },
-                            //     class: "px-3 py-1.5 text-sm text-white bg-green-600 rounded hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50",
-                            //     "Shuffle"
-                            // }
-                        }
-                    }
+                        })}
+                    } 
                 }
             }
         }
     }
-}
+

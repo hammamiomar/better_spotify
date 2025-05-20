@@ -23,6 +23,8 @@ tracing = { version = "0.1", optional = true}
 tracing-subscriber= { version = "0.3", features = ["env-filter"], optional = true } 
 lazy_static = "1.5.0"
 dioxus-logger = "0.6.2"
+log = "0.4.27"
+wasm-logger = "0.2.0"
 
 [features]
 server = ["dioxus/server",

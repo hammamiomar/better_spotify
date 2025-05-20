@@ -20,7 +20,7 @@ pub fn NavBar() -> Element {
                     li { Link { to: Route::Home {}, class: "hover:text-green-400", "Home" } }
 
                     match has_token.read().as_ref(){
-                        Some(Err(e)) =>rsx!{li {Link {to:Route::LoginPage {  }, "Login"}} },
+                        Some(Err(_e)) =>rsx!{li {Link {to:Route::LoginPage {  }, "Login"}} },
                         _ => rsx!{li {Link {to:Route::ShufflePage{  }, "Shuffle"}}}
                     }
                 }

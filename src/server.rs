@@ -7,7 +7,6 @@ use dotenvy::dotenv;
 use std::{collections::HashMap, sync::{Mutex,Arc}};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
-use serde::Deserialize;
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 
 use crate::{api_models::SpotifyTokenResponse, App};
@@ -38,10 +37,10 @@ pub async fn start_server() -> Result<()> {
 
     dioxus_logger::init(tracing::Level::INFO).expect("failed to init logger");
 
-    let client_id = env::var("SPOTIFY_CLIENT_ID")
+    let _client_id = env::var("SPOTIFY_CLIENT_ID")
         .expect("SPOTIFY_CLIENT_ID must be set in .env");
 
-    let app_state = (AppState::new());
+    let app_state = AppState::new();
 
     let provider = {
         let shared = app_state.clone();

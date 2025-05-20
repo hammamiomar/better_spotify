@@ -1,42 +1,110 @@
 use dioxus::prelude::*;
 use crate::api::{get_spotify_user_playlists_all, get_spotify_user_profile};
-use crate::api_models::{SpotifyPlaylistItem, SpotifyPlaylistsResponse, SpotifyUserProfile};
+use crate::api_models::{SpotifyPlaylistItem, SpotifyUserProfile};
 use crate::components::spotify::{PlaylistsView, ProfileView};
+use crate::Route;
 
+#[component]
+pub fn ShuffleActionPage(playlist_id:String, playlist_name: String) -> Element{
+    rsx! {
+        div {
+            class: "p-4 text-center",
+            h1 { class: "text-2xl text-green-400", "Ready to Shuffle: {playlist_name}" }
+            p { class: "text-gray-300", "ID: {playlist_id}" }
+            p { class: "mt-4", "Actual shuffling and saving logic coming soon!" }
+            // TODO: Button to trigger the actual shuffle server function
+        }
+    }
+}
 #[component]
 pub fn ShufflePage() -> Element{
     let playlists_resource : Resource<Result<Vec<SpotifyPlaylistItem>,ServerFnError>> = use_server_future(|| async{
     get_spotify_user_playlists_all().await})?;
+    let mut search_term = use_signal(String::new);
+    let selected_playlist : Signal<Option<SpotifyPlaylistItem>> = use_signal(|| None);
+
+    let navigator = use_navigator();
 
     rsx!{
-        div {class:"space-y-6",
+        div {class:"space-y-6 p-4 md:p-8",
             div { // Welcome section
                     class: "bg-gray-800 p-6 rounded-lg shadow-lg",
                     h1 { class: "text-3xl font-bold text-green-400 mb-2",
-                        "Select a playlist to shuffle"
+                        "Playlist Shuffler Studio"
                     }
-                    p { class: "text-lg text-gray-300", "True RNG shuffle..." }
+                    p { class: "text-lg text-gray-300", "Select or search for a playlist to begin..." }
                 }
+            //Search
+            div {
+                class: "my-4 p-4 bg-gray-700 rounded-lg shadow",
+                input {
+                    r#type: "text",
+                    placeholder: "Search your playlists...",
+                    class: "w-full p-3 bg-gray-800 text-gray-100 rounded-md focus:ring-2 focus:ring-green-500 focus:outline-none",
+                    value: "{search_term}", // Bind input value to the signal
+                    oninput: move |evt| search_term.set(evt.value()), // Update signal on input
+                }
+            }
         // --- Playlists Section ---
             div {
-                id: "playlists-section",
-                class: "bg-gray-800 p-6 rounded-lg shadow-lg",
-                h2 { class: "text-2xl font-semibold text-green-300 mb-3", "Your Playlists" }
-                // Match block as before
+                id: "shuffle-playlist-selection-list",
+                class: "bg-gray-800 p-4 md:p-6 rounded-lg shadow-lg",
+                h2 { class: "text-2xl font-semibold text-green-300 mb-4 border-b border-gray-700 pb-2", "Your Playlists" }
                 {
                     match playlists_resource.read().as_ref() {
-                        Some(Ok(playlist_data)) => {
-                            rsx! { PlaylistsView { playlists: playlist_data.clone() } }
+                        Some(Ok(all_playlists_vec)) => {
+                            // Filter playlists based on search_term
+                            let filtered_playlists = {
+                                let search_lower = search_term.read().to_lowercase();
+                                if search_lower.is_empty() {
+                                    all_playlists_vec.clone() // No filter, show all (clone for iteration)
+                                } else {
+                                    all_playlists_vec.iter().filter(move |p| {
+                                        p.name.to_lowercase().contains(&search_lower)
+                                    }).cloned().collect::<Vec<SpotifyPlaylistItem>>()
+                                }
+                            };
+
+                            if filtered_playlists.is_empty() && !search_term.read().is_empty() {
+                                rsx! { p { class: "text-gray-400 text-center py-4", "No playlists match your search."}}
+                            } else if filtered_playlists.is_empty() {
+                                rsx! { p { class: "text-gray-400 text-center py-4", "No playlists found."}}
+                            } else {
+                                // Pass down the selected_playlist signal and filtered list
+                                rsx!{PlaylistsView {
+                                    playlists: filtered_playlists,
+                                    selected_playlist: selected_playlist // Pass the signal
+                                }}
+                            }
                         }
                         Some(Err(e)) => {
-                            rsx! { p { class: "text-red-400", "Error loading playlists: {e}" } }
+                            rsx! { p { class: "text-red-400 text-center py-4", "Error loading playlists: {e}" } }
                         }
-                        None => {
-                            rsx! { p { class: "text-yellow-400", "Loading playlists..." } }
-                        }
+                        None => {rsx! {p { "Loading playlists..."}}}
                     }
                 }
             }
+            div {
+                class: "mt-6 text-center",
+                button {
+                    disabled: selected_playlist.read().is_none(), // Enable only if a playlist is selected
+                    class: "px-6 py-3 text-lg font-semibold text-white bg-blue-600 rounded-lg shadow hover:bg-blue-700 disabled:opacity-50 disabled:bg-gray-500 disabled:cursor-not-allowed transition-opacity",
+                    onclick: move |_| {
+                        if let Some(playlist) = selected_playlist.read().as_ref() {
+                            navigator.push(Route::ShuffleActionPage {
+                                playlist_id: playlist.id.clone(),
+                                playlist_name: playlist.name.clone(),
+                            });
+                        }
+                    },
+                    if selected_playlist.read().is_some() {
+                        "Prepare Shuffle for \"{selected_playlist.read().as_ref().unwrap().name}\""
+                    } else {
+                        "Select a Playlist to Prepare Shuffle"
+                    }
+                }
+            }
+
         }
         
     }

@@ -1,7 +1,6 @@
 use std::{vec, collections::HashMap};
 
 use dioxus::prelude::*;
-use global_attributes::break_after;
 use reqwest::Client;
 use crate::api_models::{SpotifyPlaylistItem, SpotifyPlaylistTrackResponse, SpotifyPlaylistsResponse, SpotifyTokenResponse, SpotifyTrackItem, SpotifyUserProfile};
 
@@ -124,16 +123,16 @@ pub async fn get_spotify_user_playlists_all() -> Result<Vec<SpotifyPlaylistItem>
     
     let mut all_playlists:Vec<SpotifyPlaylistItem> = vec![];
 
-    let limit: u32 = 50;
+    let mut current_limit: u32 = 50;
     let mut current_offset: u32 = 0;
 
     loop {
-        match get_spotify_user_playlists_page(limit, current_offset).await {
+        match get_spotify_user_playlists_page(current_limit, current_offset).await {
             Ok(page_response) =>{
-                if page_response.items.is_empty() && page_response.next.is_none(){
-                    tracing::info!("No more playlists to fetch.");
-                    break;
-                }
+                // if page_response.items.is_empty() && page_response.next.is_none(){
+                //     tracing::info!("No more playlists to fetch.");
+                //     break;
+                // }
                 let num_items = page_response.items.len();
                 all_playlists.extend(page_response.items);
                 tracing::info!("Page: {}, Fetched {} playlists, total now: {}. Offset was: {}, total playlists to fetch:{}",
@@ -165,6 +164,19 @@ pub async fn get_spotify_user_playlists_all() -> Result<Vec<SpotifyPlaylistItem>
                         return Err(ServerFnError::ServerError("Missing 'offset' in Spotify's next URL".to_string()));
                     }
                 };
+                current_limit = match params.get("limit") {
+                    Some(limit_str) => match limit_str.parse::<u32>() {
+                        Ok(num) => num,
+                        Err(e) => {
+                            tracing::error!("Failed to parse 'offset' from next_url query ('{}'): {}", limit_str, e);
+                            return Err(ServerFnError::ServerError(format!("Invalid 'offset' in next URL: {}", e)));
+                        }
+                    },
+                    None => {
+                        tracing::warn!("'offset' not found in next_url query: {}. Assuming end or error.", next_url);
+                        return Err(ServerFnError::ServerError("Missing 'offset' in Spotify's next URL".to_string()));
+                    }
+                };
             
             }
             Err(e) =>{
@@ -173,6 +185,9 @@ pub async fn get_spotify_user_playlists_all() -> Result<Vec<SpotifyPlaylistItem>
             }
         }
     }
+
+    let mut unique_checker = std::collections::HashSet::new(); 
+    all_playlists.retain(|p| unique_checker.insert(p.id.clone()));
     tracing::info!("Finished fetching. Total playlists retrieved: {}", all_playlists.len());
     Ok(all_playlists)
 }
