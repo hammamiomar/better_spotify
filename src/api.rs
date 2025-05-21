@@ -193,15 +193,14 @@ pub async fn get_spotify_user_playlists_all() -> Result<Vec<SpotifyPlaylistItem>
 }
 
 #[server(GetSpotifyPlaylistTracksAll)]
-pub async fn get_spotify_playlist_tracks_all(playlist_item: SpotifyPlaylistItem) -> Result<Vec<SpotifyTrackItem>,ServerFnError>{
-    tracing::info!("Attempting to get tracks for playlist:{}",playlist_item.name);
+pub async fn get_spotify_playlist_tracks_all(playlist_id: String) -> Result<Vec<SpotifyTrackItem>,ServerFnError>{
+    tracing::info!("Attempting to get tracks for playlist:{}",playlist_id);
     
 
     let mut all_tracks: Vec<SpotifyTrackItem> = vec![];
     let mut page_tracks: Vec<SpotifyTrackItem> = vec![];
     let mut current_offset: u32 = 0;
     let LIMIT :u32 = 50;
-    let playlist_id = playlist_item.id;
     
     loop {
         match get_spotify_playlist_tracks_page(playlist_id.clone(), LIMIT, current_offset).await {
@@ -264,11 +263,11 @@ pub async fn get_spotify_playlist_tracks_page(playlist_id: String, limit: u32, o
 
     let access_token = get_access_token().await?;
 
-    const FIELDS: &str = "items(track(id,name,uri,artists(name),album(name,images),duration_ms,explicit)),limit,offset,total,next";
+    const FIELDS: &str = "items(track(id,name,uri)),limit,offset,total,next";
 
     let client = Client::new();
     let mut tracks_url = reqwest::Url::parse(
-        format!("https://api.spotify.com/playlists/{}/tracks",playlist_id).as_str()).unwrap();
+        format!("https://api.spotify.com/v1/playlists/{}/tracks",playlist_id).as_str()).unwrap();
     tracks_url.query_pairs_mut()
         .append_pair("offset", &offset.to_string())
         .append_pair("limit", &limit.to_string())

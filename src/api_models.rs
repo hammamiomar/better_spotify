@@ -46,7 +46,7 @@ pub struct SpotifyPlaylistsResponse {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct SpotifyPlaylistTrackResponse {
     pub items: Vec<PlaylistItemTrackWrapper>,
-    pub href: String,
+    //pub href: String,
     pub limit: u32,
     pub next: Option<String>,
     pub offset: u32,
@@ -64,15 +64,17 @@ pub struct SpotifyTrackItem {
     pub id: Option<String>,
     pub uri: String,
     pub name: String,
-    pub artists: Vec<SpotifyTrackArtistsSimple>,
-    pub album: SpotifyTrackAlbumSimple,
+    // pub artists: Vec<SpotifyTrackArtistsSimple>,
+    // pub album: SpotifyTrackAlbumSimple,
+    // pub duration_ms: u32,
+    // pub explicit: bool, 
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct SpotifyTrackAlbumSimple {
     pub id: Option<String>,
     pub name: String,
-    pub images: Option<SpotifyImageObject>,
+    pub images: Option<Vec<SpotifyImageObject>>,
 }
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct SpotifyTrackArtistsSimple {
