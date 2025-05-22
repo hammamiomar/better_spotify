@@ -267,6 +267,52 @@ pub async fn get_spotify_playlist_tracks_all(playlist_id: String) -> Result<Vec<
     Ok(all_tracks)
 
 }
+
+#[server(GetSpotifyPlaylist)]
+pub async fn get_spotify_playlist(playlist_id: String) -> Result<SpotifyPlaylistItem, ServerFnError> {
+    tracing::info!("Attempting to get playlist details for ID: {}", playlist_id);
+    
+    let access_token = get_access_token().await?;
+    
+    let client = Client::new();
+    let playlist_url = format!("https://api.spotify.com/v1/playlists/{}", playlist_id);
+    
+    match client
+        .get(&playlist_url)
+        .bearer_auth(access_token)
+        .send()
+        .await
+    {
+        Ok(response) => {
+            if response.status().is_success() {
+                match response.json::<SpotifyPlaylistItem>().await {
+                    Ok(playlist) => {
+                        tracing::info!("Successfully fetched playlist: {}", playlist.name);
+                        Ok(playlist)
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to parse playlist json: {}", e);
+                        Err(ServerFnError::ServerError(format!(
+                            "Failed to parse Spotify playlist: {}", e
+                        )))
+                    }
+                }
+            } else {
+                let status = response.status();
+                let error_text = response.text().await.unwrap_or_else(|_| "Unknown Error".to_string());
+                tracing::error!("Failed to get playlist from Spotify, status:{}, error:{}", status, error_text);
+                
+                Err(ServerFnError::ServerError(format!(
+                    "Spotify API Error ({}): {}", status, error_text)))
+            }
+        }
+        Err(e) => {
+            tracing::error!("Network Error while fetching playlist: {}", e);
+            Err(ServerFnError::ServerError(format!("Network Error: {}", e)))
+        }
+    }
+}
+
 #[server(GetSpotifyPlaylistTracksPage)]
 pub async fn get_spotify_playlist_tracks_page(playlist_id: String, limit: u32, offset:u32) -> Result<SpotifyPlaylistTrackResponse, ServerFnError>{
     tracing::info!("Attempting spotify playlist tracks page offset: {}", offset);
@@ -590,7 +636,76 @@ pub async fn shuffle_and_save_new_playlist(
         }
         tracing::info!("API: All tracks added to new playlist: {}", new_playlist_name);
 
-        // 6. Return Success
+        // 6. Copy the original playlist's image to the new playlist
+        // First, get the original playlist details to access its images
+        match get_spotify_playlist(original_playlist_id.clone()).await {
+            Ok(original_playlist) => {
+                if let Some(images) = &original_playlist.images {
+                    if !images.is_empty() {
+                        // Typically we want the first image (usually the largest)
+                        let original_image_url = &images[0].url;
+                        tracing::info!("API: Copying image from original playlist: {}", original_image_url);
+                        
+                        // Fetch the image from the URL
+                        match client.get(original_image_url).send().await {
+                            Ok(img_response) => {
+                                if img_response.status().is_success() {
+                                    // Get the image bytes
+                                    match img_response.bytes().await {
+                                        Ok(img_bytes) => {
+                                            // Convert to base64 (required by Spotify API)
+                                            let base64_img = base64::encode(img_bytes);
+                                            
+                                            // Call Spotify API to update playlist image
+                                            let upload_image_url = format!("https://api.spotify.com/v1/playlists/{}/images", new_playlist_id);
+                                            
+                                            match client
+                                                .put(&upload_image_url)
+                                                .bearer_auth(access_token.clone())
+                                                .header("Content-Type", "image/jpeg")
+                                                .body(base64_img)
+                                                .send()
+                                                .await
+                                            {
+                                                Ok(upload_response) => {
+                                                    if upload_response.status().is_success() {
+                                                        tracing::info!("API: Successfully copied image to new playlist");
+                                                    } else {
+                                                        let status = upload_response.status();
+                                                        let err_text = upload_response.text().await.unwrap_or_default();
+                                                        tracing::error!("API: Failed to upload image: {} - {}", status, err_text);
+                                                    }
+                                                },
+                                                Err(e) => {
+                                                    tracing::error!("API: Network error uploading image: {}", e);
+                                                }
+                                            }
+                                        },
+                                        Err(e) => {
+                                            tracing::error!("API: Failed to get image bytes: {}", e);
+                                        }
+                                    }
+                                } else {
+                                    tracing::error!("API: Failed to fetch image, status: {}", img_response.status());
+                                }
+                            },
+                            Err(e) => {
+                                tracing::error!("API: Network error fetching image: {}", e);
+                            }
+                        }
+                    } else {
+                        tracing::info!("API: Original playlist has no images");
+                    }
+                } else {
+                    tracing::info!("API: Original playlist has no images array");
+                }
+            },
+            Err(e) => {
+                tracing::error!("API: Failed to get original playlist details: {}", e);
+            }
+        }
+        
+        // 7. Return Success
         let web_url = format!("https://open.spotify.com/playlist/{}", new_playlist_id);
         Ok(NewPlaylistDetails {
             id: new_playlist_id,
