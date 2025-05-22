@@ -13,6 +13,7 @@ pub mod api_models;
 
 use crate::components::layout::*;
 use crate::routes::pages::*;
+use crate::routes::shuffle::*;
 
 static CSS: Asset = asset!("/assets/tailwind.css");
 

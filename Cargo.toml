@@ -15,7 +15,7 @@ dotenvy = {version = "0.15.7", optional = true}
 reqwest = { version = "0.12.15", features = ["json"]}
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = { version = "1.0", optional = true }
-rand = {version = "0.8.0", optional = true}
+rand = { version = "0.8.0", optional = true }
 sha2 = {version = "0.10.9", optional = true}
 base64 = {version = "0.22.1", optional = true}
 anyhow = "1.0.98"
@@ -37,7 +37,8 @@ server = ["dioxus/server",
     "dep:sha2",
     "dep:tracing",
     "dep:tracing-subscriber", 
-    "dioxus-cli-config"]
+    "dioxus-cli-config",
+    "dep:rand"]
 web = ["dioxus/web"]
 
 [profile]

@@ -81,3 +81,9 @@ pub struct SpotifyTrackArtistsSimple {
     pub id: Option<String>,
     pub name: String,
 }
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct NewPlaylistDetails {
+    pub id: String,
+    pub name: String,
+    pub external_url: String, // The web URL to the new playlist
+}

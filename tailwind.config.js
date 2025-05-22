@@ -7,7 +7,11 @@ module.exports = {
         "./dist/**/*.html",
     ],
     theme: {
-        extend: {},
+        extend: {
+            colors: {
+              'spotify-green': '#1DB954', // Example
+            }
+        },
     },
     plugins: [],
 }

@@ -4,49 +4,49 @@ use crate::api_models::{SpotifyPlaylistItem, SpotifyTrackItem, SpotifyUserProfil
 use crate::components::spotify::{PlaylistsView, ProfileView};
 use crate::Route;
 
-#[component]
-pub fn ShuffleActionPage(playlist_id:String, playlist_name: String) -> Element{
-   let tracks_resource: Resource<Result<Vec<SpotifyTrackItem>, ServerFnError>> =
-       use_server_future({
-            let pid_for_closure = playlist_id.clone();
-            move || {
-                let pid_for_async_block = pid_for_closure.clone();
-                async move { 
-                    get_spotify_playlist_tracks_all(pid_for_async_block).await
-                }
-            }
-        })?;
+// #[component]
+// pub fn ShuffleActionPage(playlist_id:String, playlist_name: String) -> Element{
+//    let tracks_resource: Resource<Result<Vec<SpotifyTrackItem>, ServerFnError>> =
+//        use_server_future({
+//             let pid_for_closure = playlist_id.clone();
+//             move || {
+//                 let pid_for_async_block = pid_for_closure.clone();
+//                 async move { 
+//                     get_spotify_playlist_tracks_all(pid_for_async_block).await
+//                 }
+//             }
+//         })?;
 
-    rsx! {
-        div {
-            class: "p-4 text-center",
-            h1 { class: "text-2xl text-green-400", "Ready to Shuffle: {playlist_name}" }
-            p { class: "text-gray-300", "ID: {playlist_id}" }
-            p { class: "mt-4", "Actual shuffling and saving logic coming soon!" }
-            match tracks_resource.read().as_ref(){
-                Some(Ok(tracks_vec)) => {
-                    rsx!{
-                        ul { 
-                            {tracks_vec.iter().map(|track_item|{
-                                rsx!{
-                                    li{
-                                        key:"{track_item.uri}",
-                                        div{
-                                            p{ "{track_item.name}"}
-                                        }
-                                    }
-                                }
-                            })}
-                         }
-                    }
-                }
-                _ => {
-                    rsx!{p{"loading"}}
-                }
-            }
-        }
-    }
-}
+//     rsx! {
+//         div {
+//             class: "p-4 text-center",
+//             h1 { class: "text-2xl text-green-400", "Ready to Shuffle: {playlist_name}" }
+//             p { class: "text-gray-300", "ID: {playlist_id}" }
+//             p { class: "mt-4", "Actual shuffling and saving logic coming soon!" }
+//             match tracks_resource.read().as_ref(){
+//                 Some(Ok(tracks_vec)) => {
+//                     rsx!{
+//                         ul { 
+//                             {tracks_vec.iter().map(|track_item|{
+//                                 rsx!{
+//                                     li{
+//                                         key:"{track_item.uri}",
+//                                         div{
+//                                             p{ "{track_item.name}"}
+//                                         }
+//                                     }
+//                                 }
+//                             })}
+//                          }
+//                     }
+//                 }
+//                 _ => {
+//                     rsx!{p{"loading"}}
+//                 }
+//             }
+//         }
+//     }
+// }
 #[component]
 pub fn ShufflePage() -> Element{
     let playlists_resource : Resource<Result<Vec<SpotifyPlaylistItem>,ServerFnError>> = use_server_future(|| async{
