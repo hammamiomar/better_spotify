@@ -1,30 +1,37 @@
-use std::{env, sync::RwLock};
+use std::{env, sync::{Arc, RwLock}};
 use anyhow::Result;
 use axum::{response::Redirect, routing::get, extract::State as AxumState};
 use dioxus::prelude::*;
 use dioxus_logger;
 use dotenvy::dotenv;
-use std::{collections::HashMap, sync::{Mutex,Arc}};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
+use tower_sessions::{Expiry, MemoryStore, Session, SessionManagerLayer};
+use time::Duration;
 
-use crate::{api_models::SpotifyTokenResponse, App};
+use crate::{api_models::SpotifyTokenResponse, App, db::Database};
 use crate::auth::pkce;
 
 
 #[derive(Clone)]
-pub struct AppState{
-    pub pkce_verifiers : Arc<Mutex<HashMap<String, String>>>,
-    pub current_user_tokens: Arc<RwLock<Option<SpotifyTokenResponse>>>
+pub struct AppState {
+    pub database: Database,
+    // Keep the old in-memory tokens for backward compatibility
+    pub current_user_tokens: Arc<RwLock<Option<SpotifyTokenResponse>>>,
 }
 
-impl AppState{
-    pub fn new() -> Self{
-        Self{
-            pkce_verifiers: Arc::new(Mutex::new(HashMap::new())),
-            current_user_tokens: Arc::new(RwLock::new(None))
-        }
+impl AppState {
+    pub async fn new() -> Result<Self> {
+        let database_url = env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "sqlite:data.db".to_string());
+        
+        let database = Database::new(&database_url).await?;
+        
+        Ok(Self { 
+            database,
+            current_user_tokens: Arc::new(RwLock::new(None)),
+        })
     }
 }
 
@@ -40,7 +47,7 @@ pub async fn start_server() -> Result<()> {
     let _client_id = env::var("SPOTIFY_CLIENT_ID")
         .expect("SPOTIFY_CLIENT_ID must be set in .env");
 
-    let app_state = AppState::new();
+    let app_state = AppState::new().await?;
 
     let provider = {
         let shared = app_state.clone();
@@ -52,10 +59,18 @@ pub async fn start_server() -> Result<()> {
 
      let address = dioxus::cli_config::fullstack_address_or_localhost();
 
+    // Set up session management
+    let session_store = MemoryStore::default();
+    let session_layer = SessionManagerLayer::new(session_store)
+        .with_secure(false) // Set to true in production with HTTPS
+        .with_expiry(Expiry::OnInactivity(Duration::seconds(3600))); // 1 hour
+
     let axum_router = axum::Router::new()
         .route("/login", get(spotify_login_handler))
         .route("/callback", get(spotify_callback_handler))
+        .route("/logout", get(logout_handler))
         .serve_dioxus_application(cfg,App)
+        .layer(session_layer)
         .with_state(app_state.clone());
 
     let listener = tokio::net::TcpListener::bind(address).await?;
@@ -66,8 +81,9 @@ pub async fn start_server() -> Result<()> {
 }
 
 async fn spotify_login_handler(
-    AxumState(app_state):AxumState<AppState>,
-) -> Redirect{
+    AxumState(app_state): AxumState<AppState>,
+    _session: Session,
+) -> Redirect {
 
     let client_id = env::var("SPOTIFY_CLIENT_ID")
         .expect("sptify client id must be set");
@@ -85,15 +101,13 @@ async fn spotify_login_handler(
         .map(char::from)
         .collect();
 
-    //stroing code verifier temporarily
-
-    app_state
-        .pkce_verifiers
-        .lock()
-        .unwrap()
-        .insert(state.clone(), code_verifier);
+    // Store code verifier in database
+    if let Err(e) = app_state.database.store_pkce_verifier(&state, &code_verifier).await {
+        tracing::error!("Failed to store PKCE verifier: {}", e);
+        return Redirect::temporary("/login?error=internal_error");
+    }
     
-    tracing::info!("Stored verifier for state:{}",state);
+    tracing::info!("Stored verifier for state: {}", state);
 
     let scope = "playlist-read-private playlist-read-collaborative playlist-modify-private
     user-read-private user-read-email ugc-image-upload";
@@ -118,9 +132,10 @@ async fn spotify_login_handler(
 
 
 async fn spotify_callback_handler(
-    AxumState(app_state):AxumState<AppState>,
+    AxumState(app_state): AxumState<AppState>,
+    session: Session,
     query: axum::extract::Query<std::collections::HashMap<String,String>>,
-) -> Redirect{
+) -> Redirect {
     // query will either respond with  code and state, or error and state
     
     let code = match query.get("code"){
@@ -139,20 +154,19 @@ async fn spotify_callback_handler(
         }
     };
 
-    // get code verifier and match state, for CSRF protection
-
-    let code_verifier = {
-        let mut verifiers = app_state.pkce_verifiers.lock().unwrap();
-
-        match verifiers.remove(&received_state){
-            Some(v) => v,
-            None => {
-                tracing::error!("state mismatch OR verifier not found for state");
-                return Redirect::temporary("/login?error=state_mismatch")
-            }
+    // Get and remove code verifier from database for CSRF protection
+    let code_verifier = match app_state.database.get_and_remove_pkce_verifier(&received_state).await {
+        Ok(Some(verifier)) => verifier,
+        Ok(None) => {
+            tracing::error!("State mismatch or verifier not found/expired for state: {}", received_state);
+            return Redirect::temporary("/login?error=state_mismatch");
+        }
+        Err(e) => {
+            tracing::error!("Database error retrieving PKCE verifier: {}", e);
+            return Redirect::temporary("/login?error=internal_error");
         }
     };
-    tracing::info!("Retrieved verifier for state: {}",received_state);
+    tracing::info!("Retrieved verifier for state: {}", received_state);
 
     let client_id = env::var("SPOTIFY_CLIENT_ID").expect("SPOTIFY_CLIENT_ID must be set");
     let redirect_uri = env::var("SPOTIFY_REDIRECT_URI").expect("SPOTIFY_REDIRECT_URI must be set");
@@ -191,14 +205,75 @@ async fn spotify_callback_handler(
         Ok(token_response) =>{
             if token_response.status().is_success(){
                 match token_response.json::<SpotifyTokenResponse>().await{
-                    Ok(token_reponse) =>{
-                        tracing::info!("Succesfully obtained tokens: {:?}", token_reponse);
+                    Ok(token_response) => {
+                        tracing::info!("Successfully obtained tokens");
 
-                        //TODO Change AS its only for solo dev
+                        // First, get the user's Spotify profile to get their ID
+                        let client = reqwest::Client::new();
+                        let profile_result = client
+                            .get("https://api.spotify.com/v1/me")
+                            .bearer_auth(&token_response.access_token)
+                            .send()
+                            .await;
 
-                        *app_state.current_user_tokens.write().unwrap() = Some(token_reponse);
+                        match profile_result {
+                            Ok(profile_response) => {
+                                if profile_response.status().is_success() {
+                                    match profile_response.json::<crate::api_models::SpotifyUserProfile>().await {
+                                        Ok(profile) => {
+                                            // Find or create user
+                                            let user = match app_state.database.get_user_by_spotify_id(&profile.id).await {
+                                                Ok(Some(existing_user)) => existing_user,
+                                                Ok(None) => {
+                                                    match app_state.database.create_user(&profile.id).await {
+                                                        Ok(new_user) => new_user,
+                                                        Err(e) => {
+                                                            tracing::error!("Failed to create user: {}", e);
+                                                            return Redirect::temporary("/login?error=user_creation_failed");
+                                                        }
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    tracing::error!("Database error finding user: {}", e);
+                                                    return Redirect::temporary("/login?error=database_error");
+                                                }
+                                            };
 
-                        Redirect::temporary("/")
+                                            // Store tokens in database AND in-memory for compatibility
+                                            match app_state.database.store_user_token(&user.id, &token_response).await {
+                                                Ok(_) => {
+                                                    // Store user ID in session
+                                                    if let Err(e) = session.insert("user_id", &user.id).await {
+                                                        tracing::error!("Failed to store user ID in session: {}", e);
+                                                    }
+                                                    
+                                                    // Also store in memory for backward compatibility
+                                                    *app_state.current_user_tokens.write().unwrap() = Some(token_response);
+                                                    
+                                                    tracing::info!("Successfully authenticated user: {}", profile.id);
+                                                    Redirect::temporary("/")
+                                                }
+                                                Err(e) => {
+                                                    tracing::error!("Failed to store user tokens: {}", e);
+                                                    Redirect::temporary("/login?error=token_storage_failed")
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            tracing::error!("Failed to parse user profile: {}", e);
+                                            Redirect::temporary("/login?error=profile_parse_failed")
+                                        }
+                                    }
+                                } else {
+                                    tracing::error!("Failed to get user profile, status: {}", profile_response.status());
+                                    Redirect::temporary("/login?error=profile_fetch_failed")
+                                }
+                            }
+                            Err(e) => {
+                                tracing::error!("Network error fetching user profile: {}", e);
+                                Redirect::temporary("/login?error=network_error")
+                            }
+                        }
                     }
 
                     Err(e) => {
@@ -220,4 +295,12 @@ async fn spotify_callback_handler(
             Redirect::temporary("/login?error=network_error")
         }
     }
+}
+
+async fn logout_handler(session: Session) -> Redirect {
+    if let Err(e) = session.flush().await {
+        tracing::error!("Failed to flush session during logout: {}", e);
+    }
+    tracing::info!("User logged out");
+    Redirect::temporary("/")
 }

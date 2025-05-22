@@ -2,27 +2,38 @@ use std::{vec, collections::HashMap};
 use dioxus::prelude::*;
 
 use reqwest::Client;
-use crate::api_models::{NewPlaylistDetails, SpotifyPlaylistItem, SpotifyPlaylistTrackResponse, SpotifyPlaylistsResponse, SpotifyTokenResponse, SpotifyTrackItem, SpotifyUserProfile};
+use crate::api_models::{NewPlaylistDetails, SpotifyPlaylistItem, SpotifyPlaylistTrackResponse, SpotifyPlaylistsResponse, SpotifyTrackItem, SpotifyUserProfile};
 
 #[cfg(feature="server")]
 use crate::server::AppState;
+
+#[cfg(feature="server")]
+use base64::Engine;
 
 #[cfg(feature="server")]
 use rand::{distributions::Alphanumeric, thread_rng, Rng,seq::SliceRandom};
 
 
 #[server(GetAccessToken)]
-pub async fn get_access_token() -> Result<String, ServerFnError>{
+pub async fn get_access_token() -> Result<String, ServerFnError> {
     let FromContext(app_state) = extract::<FromContext<AppState>, ()>().await?;
 
     let tokens_guard = app_state.current_user_tokens.read().unwrap();
-    match &*tokens_guard{
+    match &*tokens_guard {
         Some(tokens) => Ok(tokens.access_token.clone()),
         None => {
             tracing::warn!("No access token found in appstate");
-            Err(ServerFnError::ServerError("User not authenticate".to_string()))
+            Err(ServerFnError::ServerError("User not authenticated".to_string()))
         }
+    }
 }
+
+#[server(IsUserAuthenticated)]
+pub async fn is_user_authenticated() -> Result<bool, ServerFnError> {
+    let FromContext(app_state) = extract::<FromContext<AppState>, ()>().await?;
+    
+    let tokens_guard = app_state.current_user_tokens.read().unwrap();
+    Ok(tokens_guard.is_some())
 }
 
 #[server(GetSpotifyUserData)]
@@ -654,7 +665,7 @@ pub async fn shuffle_and_save_new_playlist(
                                     match img_response.bytes().await {
                                         Ok(img_bytes) => {
                                             // Convert to base64 (required by Spotify API)
-                                            let base64_img = base64::encode(img_bytes);
+                                            let base64_img = base64::prelude::BASE64_STANDARD.encode(img_bytes);
                                             
                                             // Call Spotify API to update playlist image
                                             let upload_image_url = format!("https://api.spotify.com/v1/playlists/{}/images", new_playlist_id);

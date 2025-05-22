@@ -8,6 +8,8 @@ mod routes;
 mod server;
 #[cfg(feature = "server")]
 mod auth;
+#[cfg(feature = "server")]
+mod db;
 pub mod api;
 pub mod api_models;
 

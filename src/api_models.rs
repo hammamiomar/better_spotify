@@ -3,10 +3,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Deserialize, Debug)]
 pub struct SpotifyTokenResponse {
     pub access_token: String,
-    token_type: String,
-    scope: String,
-    expires_in: u64,
-    refresh_token: Option<String>,
+    pub token_type: String,
+    pub scope: Option<String>,
+    pub expires_in: u64,
+    pub refresh_token: Option<String>,
 }
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct SpotifyUserProfile {
