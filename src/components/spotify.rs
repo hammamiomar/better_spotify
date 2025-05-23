@@ -1,6 +1,5 @@
 use crate::api_models::{SpotifyPlaylistItem, SpotifyUserProfile};
 use dioxus::prelude::*;
-use log::info;
 
 #[component]
 pub fn ProfileView(profile: SpotifyUserProfile) -> Element {

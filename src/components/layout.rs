@@ -13,7 +13,7 @@ pub fn NavBar() -> Element {
                 class: "container mx-auto flex justify-between items-center",
 
                 div{class: "text-xl font-bold hover:text-green-400",
-                     Link {to:Route::Home{}, "Home"}
+                     Link {to:Route::Home{}, "BetterdSpotify"}
                     }
                 ul {class: "flex space-x-4",
 
