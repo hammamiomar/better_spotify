@@ -221,6 +221,7 @@ dependencies = [
  "axum-extra",
  "base64",
  "chrono",
+ "cookie",
  "dioxus",
  "dioxus-cli-config",
  "dioxus-logger",

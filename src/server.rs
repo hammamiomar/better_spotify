@@ -11,27 +11,15 @@ use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use axum_extra::extract::cookie::*;
 use uuid::Uuid;
-use chrono::{Utc, Duration};
+use chrono::{ Utc,Duration};
+use cookie::time::Duration as CookieDuration;
+
+
 use serde::Deserialize;
 
 use crate::{api_models::{SpotifyTokenResponse,SpotifyUserProfile}, App};
 use crate::auth::pkce;
 
-
-// #[derive(Clone)]
-// pub struct AppState{
-//     pub pkce_verifiers : Arc<Mutex<HashMap<String, String>>>,
-//     pub current_user_tokens: Arc<RwLock<Option<SpotifyTokenResponse>>>
-// }
-
-// impl AppState{
-//     pub fn new() -> Self{
-//         Self{
-//             pkce_verifiers: Arc::new(Mutex::new(HashMap::new())),
-//             current_user_tokens: Arc::new(RwLock::new(None))
-//         }
-//     }
-// }
 
 #[derive(Clone)]
 pub struct AppState{
@@ -70,6 +58,7 @@ pub async fn start_server() -> Result<()> {
     let axum_router = axum::Router::new()
         .route("/login", get(spotify_login_handler))
         .route("/callback", get(spotify_callback_handler))
+        .route("/auth/logout", get(axum_logout_handler)) 
         .with_state(app_state.clone())
         .serve_dioxus_application(cfg,App);
 
@@ -250,7 +239,7 @@ async fn spotify_callback_handler(
         Err(_) => return (jar, Redirect::temporary("/login?error=profile_fetch_failed")),
     };
 
-    // Write User and tokens to DB
+    // NEO4J user setup
     let mut user_query = neo4rs::query(
             "MERGE (u:User {spotify_id: $id})
             SET u.display_name = $name,
@@ -292,7 +281,7 @@ async fn spotify_callback_handler(
     // --- Step 6: Set the Session Cookie and Redirect to Home ---
     let cookie = Cookie::build(("sid", session_id))
         .path("/")
-        .secure(true) // Set to true in production
+        .secure(cfg!(not(debug_assertions))) // Only secure in production
         .http_only(true)
         .same_site(SameSite::Lax)
         .build();
@@ -300,4 +289,15 @@ async fn spotify_callback_handler(
     // Add the cookie to the jar and redirect
     let new_jar = jar.add(cookie);
     (new_jar, Redirect::temporary("/"))
+}
+
+async fn axum_logout_handler(jar: CookieJar) -> (CookieJar, Redirect) {
+    // Remove the old cookie by creating a new one that expires immediately.
+    let cookie = Cookie::build(("sid", ""))
+        .path("/")
+        .max_age(CookieDuration::ZERO)
+        .build();
+
+    // Add the expiring cookie to the jar and redirect to the login page.
+    (jar.add(cookie), Redirect::to("/login"))
 }

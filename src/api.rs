@@ -1,28 +1,51 @@
 use std::{vec, collections::HashMap};
+use axum::extract::FromRef;
 use dioxus::prelude::*;
 
 use reqwest::Client;
-use crate::api_models::{NewPlaylistDetails, SpotifyPlaylistItem, SpotifyPlaylistTrackResponse, SpotifyPlaylistsResponse, SpotifyTrackItem, SpotifyUserProfile};
+use crate::{api_models::{NewPlaylistDetails, SpotifyPlaylistItem, SpotifyPlaylistTrackResponse, SpotifyPlaylistsResponse, SpotifyTrackItem, SpotifyUserProfile}};
 
 #[cfg(feature="server")]
 use crate::server::AppState;
 
 #[cfg(feature="server")]
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+
+#[cfg(feature="server")]
 use rand::{thread_rng, seq::SliceRandom};
+
+#[cfg(feature="server")]
+use neo4rs::query;
+
+#[cfg(feature="server")]
+use crate::middleware::UserContext;
 
 
 #[server(GetAccessToken)]
-pub async fn get_access_token() -> Result<String, ServerFnError>{
+pub async fn get_access_token() -> Result<String, ServerFnError> {
+    let FromContext(user_context) = extract::<FromContext<UserContext>, ()>().await?;
     let FromContext(app_state) = extract::<FromContext<AppState>, ()>().await?;
-
-    let tokens_guard = app_state.current_user_tokens.read().unwrap();
-    match &*tokens_guard{
-        Some(tokens) => Ok(tokens.access_token.clone()),
-        None => {
-            tracing::warn!("No access token found in appstate");
-            Err(ServerFnError::ServerError("User not authenticate".to_string()))
-        }
+    let token = user_context.get_access_token(&app_state.db).await?;
+    
+    Ok(token)
 }
+#[server(Logout)]
+pub async fn logout() -> Result<(), ServerFnError> {
+    // 1. Get the authenticated user and app state.
+    let FromContext(user_context) = extract::<FromContext<UserContext>, ()>().await?;
+    let FromContext(app_state) = extract::<FromContext<AppState>, ()>().await?;
+    
+    let mut query = query(
+        "MATCH (u:User {spotify_id: $uid})-[r:HAS_SESSION]->(s:Session)
+         DETACH DELETE s"
+    );
+    query = query.param("uid", user_context.spotify_id);
+
+    if let Err(e) = app_state.db.run(query).await {
+        tracing::error!("Failed to delete session(s) from DB: {}", e);
+    }
+    
+    Ok(())
 }
 
 #[server(GetSpotifyUserData)]
@@ -506,7 +529,7 @@ pub async fn shuffle_and_save_new_playlist(
                                     match img_response.bytes().await {
                                         Ok(img_bytes) => {
                                             // Convert to base64 (required by Spotify API)
-                                            let base64_img = base64::encode(img_bytes);
+                                            let base64_img = STANDARD.encode(img_bytes);
                                             
                                             // Call Spotify API to update playlist image
                                             let upload_image_url = format!("https://api.spotify.com/v1/playlists/{}/images", new_playlist_id);

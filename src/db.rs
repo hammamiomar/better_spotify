@@ -18,6 +18,7 @@ pub async fn connect() -> Arc<Graph>{
         .uri(uri)
         .user(&user)
         .password(&pass)
+        .max_connections(50)
         .build()
         .unwrap();
     Arc::new(Graph::connect(config).await.unwrap())

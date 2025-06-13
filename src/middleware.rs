@@ -1,13 +1,13 @@
-// in src/middleware.rs
+use dioxus::prelude::server_fn::error::NoCustomError;
+use dioxus::prelude::*;
 use axum::{
     async_trait,
     extract::FromRequestParts,
-    http::{request::Parts, StatusCode},
-    response::{IntoResponse, Redirect},
+    http::request::Parts,
+    response::{IntoResponse,Redirect},
 };
 use axum_extra::extract::cookie::CookieJar;
-use neo4rs::{query, Query, Row};
-use std::sync::Arc;
+use neo4rs::query;
 
 use crate::server::AppState;
 
@@ -17,9 +17,58 @@ use crate::server::AppState;
 pub struct UserContext {
     pub spotify_id: String,
 }
+#[cfg(feature = "server")]
+impl UserContext {
+    /// Get the user's current access token from the database
+    pub async fn get_access_token(&self, db: &neo4rs::Graph) -> Result<String, ServerFnError<NoCustomError>> {
+        let query = neo4rs::query(
+            "MATCH (u:User {spotify_id: $id})
+             RETURN u.access_token as token"
+        ).param("id", self.spotify_id.clone());
+        
+        let mut result = db.execute(query).await
+            .map_err(|e| ServerFnError::ServerError::<NoCustomError>(format!("Database error: {}", e)))?;
+        
+        match result.next().await {
+            Ok(Some(row)) => row.get::<String>("token")
+                .map_err(|e| ServerFnError::ServerError(format!("Failed to get token: {}", e))),
+            Ok(None) => Err(ServerFnError::ServerError("User not found or no token".to_string())),
+            Err(e) => Err(ServerFnError::ServerError(format!("Database error: {}", e)))
+        }
+    }
+    
+    /// Get the user's refresh token from the database
+    pub async fn get_refresh_token(&self, db: &neo4rs::Graph) -> Result<String, ServerFnError<NoCustomError>> {
+        let query = neo4rs::query(
+            "MATCH (u:User {spotify_id: $id})
+             RETURN u.refresh_token as token"
+        ).param("id", self.spotify_id.clone());
+        
+        let mut result = db.execute(query).await
+            .map_err(|e| ServerFnError::ServerError::<NoCustomError>(format!("Database error: {}", e)))?;
+        
+        match result.next().await {
+            Ok(Some(row)) => row.get::<String>("token")
+                .map_err(|e| ServerFnError::ServerError(format!("Failed to get refresh token: {}", e))),
+            Ok(None) => Err(ServerFnError::ServerError("User not found or no refresh token".to_string())),
+            Err(e) => Err(ServerFnError::ServerError(format!("Database error: {}", e)))
+        }
+    }
+    
+    /// Update the user's access token in the database
+    pub async fn update_access_token(&self, db: &neo4rs::Graph, new_token: &str) -> Result<(), ServerFnError<NoCustomError>> {
+        let query = neo4rs::query(
+            "MATCH (u:User {spotify_id: $id})
+             SET u.access_token = $token"
+        )
+        .param("id", self.spotify_id.clone())
+        .param("token", new_token);
+        
+        db.run(query).await
+            .map_err(|e| ServerFnError::ServerError::<NoCustomError>(format!("Failed to update token: {}", e)))
+    }
+}
 
-// This is the core of the middleware. We're telling Axum how to create
-// a UserContext from the parts of an incoming HTTP request.
 #[async_trait]
 impl FromRequestParts<AppState> for UserContext {
     // Define the type of error that can occur if authentication fails.
@@ -36,12 +85,11 @@ impl FromRequestParts<AppState> for UserContext {
             .map_err(|_| Redirect::temporary("/login?error=cookie_error"))?;
 
         // 2. Try to get our specific session ID cookie ("sid").
-        let session_id = if let Some(cookie) = jar.get("sid") {
-            cookie.value().to_string()
-        } else {
-            // If there's no cookie, the user is not logged in. Reject and redirect.
-            return Err(Redirect::temporary("/login?reason=no_session"));
-        };
+        let session_id = jar
+            .get("sid")
+            .ok_or_else(|| Redirect::temporary("/login?reason=no_session"))?
+            .value()
+            .to_string();
 
         // 3. Query the database to see if this is a valid, unexpired session.
         let mut query = query(
@@ -60,7 +108,10 @@ impl FromRequestParts<AppState> for UserContext {
         // 4. Check the query result.
         if let Ok(Some(row)) = result.next().await {
             // If we got a row, the session is valid! Extract the spotify_id.
-            let spotify_id: String = row.get("spotify_id").unwrap();
+            let spotify_id: String = row.get("spotify_id").map_err(|e| {
+                tracing::error!("Failed to get spotify_id from row: {}", e);
+                Redirect::temporary("/login?error=data_error")
+            })?;
             Ok(UserContext { spotify_id })
         } else {
             // If we got no rows, the session is invalid or expired. Reject and redirect.

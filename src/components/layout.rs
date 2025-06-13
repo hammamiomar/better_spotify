@@ -1,10 +1,17 @@
-use dioxus::prelude::*;
-use crate::{api::get_access_token, Route};
+use dioxus::{document::eval, prelude::*};
+use crate::{api::{get_access_token, logout}, Route};
 
 #[component]
 pub fn NavBar() -> Element {
     let has_token = use_server_future( || async {
         get_access_token().await})?;
+    let logout_coroutine = use_coroutine(|_rx: UnboundedReceiver<()>|{
+        async move {
+            logout().await;
+
+            let _ = eval(r#"window.location.href = "/auth/logout";"#);
+        }
+    });
 
     rsx! {
         header {
@@ -21,7 +28,21 @@ pub fn NavBar() -> Element {
 
                     match has_token.read().as_ref(){
                         Some(Err(_e)) =>rsx!{li {Link {to:Route::LoginPage {  }, "Login"}} },
-                        _ => rsx!{li {Link {to:Route::ShufflePage{  }, "Shuffle"}}}
+                        _ => rsx!{
+                            li {Link {to:Route::ShufflePage{  }, "Shuffle"}}
+
+                            li {
+                                button {
+                                    class: "bg-red-600 hover:bg-red-700 text-white font-bold py-1 px-3 rounded transition-colors",
+                                    // The onclick handler for logout
+                                    onclick: move |_| {
+                                        logout_coroutine.send(());
+                                    },
+                                    "Logout"
+                                }
+                        
+                            }
+                        }
                     }
                 }
             }
