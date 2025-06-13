@@ -268,50 +268,6 @@ pub async fn get_spotify_playlist_tracks_all(playlist_id: String) -> Result<Vec<
 
 }
 
-#[server(GetSpotifyPlaylist)]
-pub async fn get_spotify_playlist(playlist_id: String) -> Result<SpotifyPlaylistItem, ServerFnError> {
-    tracing::info!("Attempting to get playlist details for ID: {}", playlist_id);
-    
-    let access_token = get_access_token().await?;
-    
-    let client = Client::new();
-    let playlist_url = format!("https://api.spotify.com/v1/playlists/{}", playlist_id);
-    
-    match client
-        .get(&playlist_url)
-        .bearer_auth(access_token)
-        .send()
-        .await
-    {
-        Ok(response) => {
-            if response.status().is_success() {
-                match response.json::<SpotifyPlaylistItem>().await {
-                    Ok(playlist) => {
-                        tracing::info!("Successfully fetched playlist: {}", playlist.name);
-                        Ok(playlist)
-                    }
-                    Err(e) => {
-                        tracing::error!("Failed to parse playlist json: {}", e);
-                        Err(ServerFnError::ServerError(format!(
-                            "Failed to parse Spotify playlist: {}", e
-                        )))
-                    }
-                }
-            } else {
-                let status = response.status();
-                let error_text = response.text().await.unwrap_or_else(|_| "Unknown Error".to_string());
-                tracing::error!("Failed to get playlist from Spotify, status:{}, error:{}", status, error_text);
-                
-                Err(ServerFnError::ServerError(format!(
-                    "Spotify API Error ({}): {}", status, error_text)))
-            }
-        }
-        Err(e) => {
-            tracing::error!("Network Error while fetching playlist: {}", e);
-            Err(ServerFnError::ServerError(format!("Network Error: {}", e)))
-        }
-    }
-}
 
 #[server(GetSpotifyPlaylistTracksPage)]
 pub async fn get_spotify_playlist_tracks_page(playlist_id: String, limit: u32, offset:u32) -> Result<SpotifyPlaylistTrackResponse, ServerFnError>{
@@ -319,7 +275,7 @@ pub async fn get_spotify_playlist_tracks_page(playlist_id: String, limit: u32, o
 
     let access_token = get_access_token().await?;
 
-    const FIELDS: &str = "items(track(id,name,uri)),limit,offset,total,next";
+    const FIELDS: &str = "items(track(id,name,uri,artists(id,name))),limit,offset,total,next";
 
     let client = Client::new();
     let mut tracks_url = reqwest::Url::parse(
@@ -364,6 +320,51 @@ pub async fn get_spotify_playlist_tracks_page(playlist_id: String, limit: u32, o
         }
         Err(e) => {
             tracing::error!("Network Error while fetching user playlists: {}",e);
+            Err(ServerFnError::ServerError(format!("Network Error: {}", e)))
+        }
+    }
+}
+
+#[server(GetSpotifyPlaylist)]
+pub async fn get_spotify_playlist(playlist_id: String) -> Result<SpotifyPlaylistItem, ServerFnError> {
+    tracing::info!("Attempting to get playlist details for ID: {}", playlist_id);
+    
+    let access_token = get_access_token().await?;
+    
+    let client = Client::new();
+    let playlist_url = format!("https://api.spotify.com/v1/playlists/{}", playlist_id);
+    
+    match client
+        .get(&playlist_url)
+        .bearer_auth(access_token)
+        .send()
+        .await
+    {
+        Ok(response) => {
+            if response.status().is_success() {
+                match response.json::<SpotifyPlaylistItem>().await {
+                    Ok(playlist) => {
+                        tracing::info!("Successfully fetched playlist: {}", playlist.name);
+                        Ok(playlist)
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to parse playlist json: {}", e);
+                        Err(ServerFnError::ServerError(format!(
+                            "Failed to parse Spotify playlist: {}", e
+                        )))
+                    }
+                }
+            } else {
+                let status = response.status();
+                let error_text = response.text().await.unwrap_or_else(|_| "Unknown Error".to_string());
+                tracing::error!("Failed to get playlist from Spotify, status:{}, error:{}", status, error_text);
+                
+                Err(ServerFnError::ServerError(format!(
+                    "Spotify API Error ({}): {}", status, error_text)))
+            }
+        }
+        Err(e) => {
+            tracing::error!("Network Error while fetching playlist: {}", e);
             Err(ServerFnError::ServerError(format!("Network Error: {}", e)))
         }
     }

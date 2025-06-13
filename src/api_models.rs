@@ -6,7 +6,7 @@ pub struct SpotifyTokenResponse {
     token_type: String,
     scope: String,
     expires_in: u64,
-    refresh_token: Option<String>,
+    pub refresh_token: Option<String>,
 }
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct SpotifyUserProfile {
@@ -64,7 +64,7 @@ pub struct SpotifyTrackItem {
     pub id: Option<String>,
     pub uri: String,
     pub name: String,
-    // pub artists: Vec<SpotifyTrackArtistsSimple>,
+    pub artists: Vec<SpotifyArtistSimple>,
     // pub album: SpotifyTrackAlbumSimple,
     // pub duration_ms: u32,
     // pub explicit: bool, 
@@ -77,7 +77,7 @@ pub struct SpotifyTrackAlbumSimple {
     pub images: Option<Vec<SpotifyImageObject>>,
 }
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct SpotifyTrackArtistsSimple {
+pub struct SpotifyArtistSimple {
     pub id: Option<String>,
     pub name: String,
 }
