@@ -97,7 +97,7 @@ impl FromRequestParts<AppState> for UserContext {
              WHERE s.expires_at > datetime()
              RETURN u.spotify_id AS spotify_id",
         );
-        query = query.param("sid", session_id);
+        query = query.param("sid", session_id.clone());
 
         // Run the query and get the first row of results.
         let mut result = state.db.execute(query).await.map_err(|e| {
@@ -119,3 +119,49 @@ impl FromRequestParts<AppState> for UserContext {
         }
     }
 }
+
+// Optional user context that doesn't redirect
+#[derive(Clone)]
+pub struct OptionalUser(pub Option<String>); // Just the spotify_id if authenticated
+
+#[async_trait]
+impl FromRequestParts<AppState> for OptionalUser {
+    type Rejection = ();
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        // Extract cookies - if this fails, return None
+        let jar = match CookieJar::from_request_parts(parts, state).await {
+            Ok(jar) => jar,
+            Err(_) => return Ok(OptionalUser(None)),
+        };
+        
+        // Check for session cookie
+        let session_id = match jar.get("sid") {
+            Some(cookie) => cookie.value().to_string(),
+            None => return Ok(OptionalUser(None)),
+        };
+        
+        // Quick database check
+        let mut query = query(
+            "MATCH (u:User)-[:HAS_SESSION]->(s:Session {session_id: $sid})
+             WHERE s.expires_at > datetime()
+             RETURN u.spotify_id AS spotify_id",
+        );
+        query = query.param("sid", session_id);
+        
+        match state.db.execute(query).await {
+            Ok(mut result) => match result.next().await {
+                Ok(Some(row)) => match row.get::<String>("spotify_id") {
+                    Ok(id) => Ok(OptionalUser(Some(id))),
+                    Err(_) => Ok(OptionalUser(None)),
+                },
+                _ => Ok(OptionalUser(None)),
+            },
+            Err(_) => Ok(OptionalUser(None)),
+        }
+    }
+}
+

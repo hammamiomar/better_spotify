@@ -100,9 +100,8 @@ pub fn ShufflePage() -> Element{
 
 #[component]
 pub fn Home() -> Element {
-    let profile_resource: Resource<Result<SpotifyUserProfile, ServerFnError>> = use_server_future( || async {
-        get_spotify_user_profile().await})?;
-
+    let is_authenticated = use_server_future( || async {
+        crate::api::check_auth().await})?;
 
     rsx! {
         div {class: "space-y-6", 
@@ -119,22 +118,50 @@ pub fn Home() -> Element {
                  AND GET THE SAME SONGS EVERYTIME BECAUSE YOU THINK THOSE ARE MY FAVORITE SONGS -- ONLY BECAUSE YOU ALWAYS GIVE THEM TO ME" }            }
 
             // --- User Profile Section ---
-            div {
-                id: "user-profile",
-                class: "bg-gray-800 p-6 rounded-lg shadow-lg",
-                h2 { class: "text-2xl font-semibold text-green-300 mb-3", "Profile" }
-                // Match block as before
-                {
-                    match profile_resource.read().as_ref() {
-                        Some(Ok(profile)) => rsx! { ProfileView { profile: profile.clone() } },
-                        Some(Err(e)) => rsx! { p { class: "text-red-400", "Error loading profile: {e}" } },
-                        None => rsx! { p { class: "text-yellow-400", "Loading profile..." } }
+            match is_authenticated.read().as_ref() {
+                Some(Ok(true)) => rsx! {
+                    // Show authenticated content
+                    AuthenticatedUserProfile {}
+                },
+                Some(Ok(false)) => rsx! {
+                    div {
+                        class: "bg-gray-800 p-6 rounded-lg shadow-lg text-center",
+                        h2 { class: "text-2xl font-semibold text-green-300 mb-3", "Get Started" }
+                        p { class: "text-gray-300 mb-4", "Login with Spotify to start shuffling your playlists!" }
+                        Link {
+                            to: Route::LoginPage {},
+                            class: "inline-block px-8 py-3 text-lg font-semibold text-white bg-green-500 rounded-lg shadow-md hover:bg-green-600 transition-colors",
+                            "Login with Spotify"
+                        }
                     }
-                }
-            }  
+                },
+                _ => rsx! {}  // Loading or error state
+            }
         }
     }
 }
+
+#[component]
+fn AuthenticatedUserProfile() -> Element {
+    let profile_resource: Resource<Result<SpotifyUserProfile, ServerFnError>> = use_server_future( || async {
+        get_spotify_user_profile().await})?;
+    
+    rsx! {
+        div {
+            id: "user-profile",
+            class: "bg-gray-800 p-6 rounded-lg shadow-lg",
+            h2 { class: "text-2xl font-semibold text-green-300 mb-3", "Profile" }
+            {
+                match profile_resource.read().as_ref() {
+                    Some(Ok(profile)) => rsx! { ProfileView { profile: profile.clone() } },
+                    Some(Err(e)) => rsx! { p { class: "text-red-400", "Error loading profile: {e}" } },
+                    None => rsx! { p { class: "text-yellow-400", "Loading profile..." } }
+                }
+            }
+        }
+    }
+}
+
 
 #[component]
 pub fn LoginPage() -> Element {
@@ -157,7 +184,7 @@ pub fn LoginPage() -> Element {
                 }
 
                 a {
-                    href: "/login", // This path is handled by your Axum server
+                    href: "/auth/spotify", // This path is handled by your Axum server
                     class: "inline-block w-full sm:w-auto px-8 py-3 text-lg font-semibold text-white bg-green-500 rounded-lg shadow-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-400 focus:ring-opacity-75 transition-colors duration-150",
                     "Login with Spotify"
                 }

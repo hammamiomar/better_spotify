@@ -56,7 +56,7 @@ pub async fn start_server() -> Result<()> {
      let address = dioxus::cli_config::fullstack_address_or_localhost();
 
     let axum_router = axum::Router::new()
-        .route("/login", get(spotify_login_handler))
+        .route("/auth/spotify", get(spotify_login_handler))
         .route("/callback", get(spotify_callback_handler))
         .route("/auth/logout", get(axum_logout_handler)) 
         .with_state(app_state.clone())
@@ -284,6 +284,7 @@ async fn spotify_callback_handler(
         .secure(cfg!(not(debug_assertions))) // Only secure in production
         .http_only(true)
         .same_site(SameSite::Lax)
+        .max_age(CookieDuration::days(7)) // Cookie expires in 7 days
         .build();
 
     // Add the cookie to the jar and redirect
@@ -298,6 +299,6 @@ async fn axum_logout_handler(jar: CookieJar) -> (CookieJar, Redirect) {
         .max_age(CookieDuration::ZERO)
         .build();
 
-    // Add the expiring cookie to the jar and redirect to the login page.
-    (jar.add(cookie), Redirect::to("/login"))
+    // Add the expiring cookie to the jar and redirect to home page.
+    (jar.add(cookie), Redirect::to("/"))
 }

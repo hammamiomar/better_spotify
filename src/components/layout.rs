@@ -1,17 +1,10 @@
 use dioxus::{document::eval, prelude::*};
-use crate::{api::{get_access_token, logout}, Route};
+use crate::{api::{check_auth, logout}, Route};
 
 #[component]
 pub fn NavBar() -> Element {
-    let has_token = use_server_future( || async {
-        get_access_token().await})?;
-    let logout_coroutine = use_coroutine(|_rx: UnboundedReceiver<()>|{
-        async move {
-            logout().await;
-
-            let _ = eval(r#"window.location.href = "/auth/logout";"#);
-        }
-    });
+    let is_authenticated = use_server_future( || async {
+        check_auth().await})?;
 
     rsx! {
         header {
@@ -26,17 +19,19 @@ pub fn NavBar() -> Element {
 
                     li { Link { to: Route::Home {}, class: "hover:text-green-400", "Home" } }
 
-                    match has_token.read().as_ref(){
-                        Some(Err(_e)) =>rsx!{li {Link {to:Route::LoginPage {  }, "Login"}} },
-                        _ => rsx!{
+                    match is_authenticated.read().as_ref(){
+                        None => rsx!{}, // Still loading, show nothing
+                        Some(Err(_e)) => rsx!{li {Link {to:Route::LoginPage {  }, "Login"}} },
+                        Some(Ok(false)) => rsx!{li {Link {to:Route::LoginPage {  }, "Login"}} },
+                        Some(Ok(true)) => rsx!{
                             li {Link {to:Route::ShufflePage{  }, "Shuffle"}}
 
                             li {
                                 button {
                                     class: "bg-red-600 hover:bg-red-700 text-white font-bold py-1 px-3 rounded transition-colors",
-                                    // The onclick handler for logout
-                                    onclick: move |_| {
-                                        logout_coroutine.send(());
+                                    onclick: move |_| async move {
+                                        let _ = logout().await;
+                                        let _ = eval(r#"window.location.href = "/auth/logout";"#);
                                     },
                                     "Logout"
                                 }

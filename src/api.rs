@@ -1,5 +1,4 @@
 use std::{vec, collections::HashMap};
-use axum::extract::FromRef;
 use dioxus::prelude::*;
 
 use reqwest::Client;
@@ -18,31 +17,35 @@ use rand::{thread_rng, seq::SliceRandom};
 use neo4rs::query;
 
 #[cfg(feature="server")]
-use crate::middleware::UserContext;
+use crate::auth::helpers::{get_current_user, require_auth};
+
 
 
 #[server(GetAccessToken)]
 pub async fn get_access_token() -> Result<String, ServerFnError> {
-    let FromContext(user_context) = extract::<FromContext<UserContext>, ()>().await?;
-    let FromContext(app_state) = extract::<FromContext<AppState>, ()>().await?;
-    let token = user_context.get_access_token(&app_state.db).await?;
-    
-    Ok(token)
+    let user = require_auth().await?;
+    Ok(user.access_token)
+}
+
+#[server(CheckAuth)]
+pub async fn check_auth() -> Result<bool, ServerFnError> {
+    Ok(get_current_user().await.is_some())
 }
 #[server(Logout)]
 pub async fn logout() -> Result<(), ServerFnError> {
-    // 1. Get the authenticated user and app state.
-    let FromContext(user_context) = extract::<FromContext<UserContext>, ()>().await?;
-    let FromContext(app_state) = extract::<FromContext<AppState>, ()>().await?;
-    
-    let mut query = query(
-        "MATCH (u:User {spotify_id: $uid})-[r:HAS_SESSION]->(s:Session)
-         DETACH DELETE s"
-    );
-    query = query.param("uid", user_context.spotify_id);
+    if let Some(user) = get_current_user().await {
+        let FromContext(app_state) = extract::<FromContext<AppState>, ()>().await?;
+        
+        // Delete all sessions for this user
+        let mut query = query(
+            "MATCH (u:User {spotify_id: $id})-[r:HAS_SESSION]->(s:Session)
+             DETACH DELETE s"
+        );
+        query = query.param("id", user.spotify_id);
 
-    if let Err(e) = app_state.db.run(query).await {
-        tracing::error!("Failed to delete session(s) from DB: {}", e);
+        if let Err(e) = app_state.db.run(query).await {
+            tracing::error!("Failed to delete session from DB: {}", e);
+        }
     }
     
     Ok(())
@@ -50,7 +53,6 @@ pub async fn logout() -> Result<(), ServerFnError> {
 
 #[server(GetSpotifyUserData)]
 pub async fn get_spotify_user_profile() -> Result<SpotifyUserProfile, ServerFnError>{
-    tracing::info!("Attempting spotify user profile");
 
 
     let access_token = get_access_token().await?;
@@ -67,10 +69,7 @@ pub async fn get_spotify_user_profile() -> Result<SpotifyUserProfile, ServerFnEr
         Ok(response) => {
             if response.status().is_success(){
                 match response.json::<SpotifyUserProfile>().await {
-                    Ok(profile) => {
-                        tracing::info!("Succesfully fetched profile: {:?}",profile.display_name);
-                        Ok(profile)
-                    }
+                    Ok(profile) => Ok(profile),
                     Err(e) => {
                         tracing::error!("failed to parse user profile json {}", e);
                         Err(ServerFnError::ServerError(format!(
