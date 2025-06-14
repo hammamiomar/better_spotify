@@ -99,8 +99,8 @@ async fn spotify_login_handler(
     
     tracing::info!("Stored verifier for state:{}",state);
 
-    let scope = "playlist-read-private playlist-read-collaborative playlist-modify-private
-    user-read-private user-read-email ugc-image-upload";
+    let scope = "playlist-read-private playlist-read-collaborative playlist-modify-private playlist-modify-public
+    user-read-private user-read-email ugc-image-upload user-library-read";
 
     // construct URL
 

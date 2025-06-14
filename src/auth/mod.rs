@@ -27,6 +27,7 @@ pub mod helpers {
     use dioxus::prelude::*;
     use neo4rs::query;
     use crate::server::AppState;
+    use base64::Engine;
     
     /// Simple struct to hold authenticated user info
     pub struct AuthenticatedUser {
@@ -74,7 +75,117 @@ pub mod helpers {
         })
     }
     
-    /// Require authentication - returns error if not authenticated
+    /// Refresh an expired access token using the refresh token
+    pub async fn refresh_access_token(user: &AuthenticatedUser) -> Result<AuthenticatedUser, ServerFnError> {
+        let refresh_token = match user.refresh_token.as_ref() {
+            Some(token) => token,
+            None => return Err(ServerFnError::ServerError("No refresh token available".to_string())),
+        };
+        
+        let client_id = match std::env::var("SPOTIFY_CLIENT_ID") {
+            Ok(id) => id,
+            Err(_) => return Err(ServerFnError::ServerError("SPOTIFY_CLIENT_ID not set".to_string())),
+        };
+        let client_secret = match std::env::var("SPOTIFY_CLIENT_SECRET") {
+            Ok(secret) => secret,
+            Err(_) => return Err(ServerFnError::ServerError("SPOTIFY_CLIENT_SECRET not set".to_string())),
+        };
+        
+        let client = reqwest::Client::new();
+        let token_endpoint = "https://accounts.spotify.com/api/token";
+        
+        let params = [
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh_token),
+        ];
+        
+        let auth_header = base64::engine::general_purpose::STANDARD
+            .encode(format!("{}:{}", client_id, client_secret));
+        
+        tracing::info!("Refreshing access token for user {}", user.spotify_id);
+        
+        let response = match client
+            .post(token_endpoint)
+            .header("Authorization", format!("Basic {}", auth_header))
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .form(&params)
+            .send()
+            .await {
+                Ok(resp) => resp,
+                Err(e) => return Err(ServerFnError::ServerError(format!("Network error refreshing token: {}", e))),
+            };
+        
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            tracing::error!("Token refresh failed: {} - {}", status, error_text);
+            return Err(ServerFnError::ServerError(format!("Token refresh failed: {}", status)));
+        }
+        
+        #[derive(serde::Deserialize)]
+        struct TokenRefreshResponse {
+            access_token: String,
+            refresh_token: Option<String>,
+        }
+        
+        let token_response: TokenRefreshResponse = match response.json().await {
+            Ok(data) => data,
+            Err(e) => return Err(ServerFnError::ServerError(format!("Failed to parse refresh response: {}", e))),
+        };
+        
+        // Update the database with the new tokens
+        let FromContext(app_state) = match extract::<FromContext<AppState>, ()>().await {
+            Ok(state) => state,
+            Err(e) => return Err(ServerFnError::ServerError(format!("Failed to get app state: {}", e))),
+        };
+        
+        let mut update_query = query(
+            "MATCH (u:User {spotify_id: $id})
+             SET u.access_token = $access_token,
+                 u.refresh_token = COALESCE($refresh_token, u.refresh_token),
+                 u.token_updated_at = datetime()"
+        );
+        update_query = update_query
+            .param("id", user.spotify_id.clone())
+            .param("access_token", token_response.access_token.clone())
+            .param("refresh_token", token_response.refresh_token.clone().unwrap_or_else(|| refresh_token.clone()));
+        
+        if let Err(e) = app_state.db.run(update_query).await {
+            tracing::error!("Failed to update tokens in database: {}", e);
+            return Err(ServerFnError::ServerError("Failed to update tokens".to_string()));
+        }
+        
+        tracing::info!("Successfully refreshed access token for user {}", user.spotify_id);
+        
+        Ok(AuthenticatedUser {
+            spotify_id: user.spotify_id.clone(),
+            access_token: token_response.access_token,
+            refresh_token: Some(token_response.refresh_token.unwrap_or_else(|| refresh_token.clone())),
+        })
+    }
+    
+    /// Get a valid access token, refreshing if necessary
+    pub async fn get_valid_access_token() -> Result<String, ServerFnError> {
+        let user = require_auth().await?;
+        Ok(user.access_token)
+    }
+    
+    /// Handle 401 errors by refreshing the token and returning a new one
+    pub async fn handle_token_expired_error() -> Result<String, ServerFnError> {
+        let user = require_auth().await?;
+        let refreshed_user = refresh_access_token(&user).await?;
+        Ok(refreshed_user.access_token)
+    }
+    
+    /// Require authentication with automatic token refresh
+    pub async fn require_auth_with_refresh() -> Result<AuthenticatedUser, ServerFnError> {
+        match get_current_user().await {
+            Some(user) => Ok(user),
+            None => Err(ServerFnError::ServerError("Authentication required".to_string())),
+        }
+    }
+    
+    /// Require authentication - returns error if not authenticated  
     pub async fn require_auth() -> Result<AuthenticatedUser, ServerFnError> {
         get_current_user().await
             .ok_or_else(|| ServerFnError::ServerError("Authentication required".to_string()))

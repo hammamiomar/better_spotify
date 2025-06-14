@@ -14,7 +14,7 @@ dioxus-cli-config = { version = "*", optional = true }
 dotenvy = {version = "0.15.7", optional = true}
 reqwest = { version = "0.12.15", features = ["json"]}
 serde = { version = "1.0.219", features = ["derive"] }
-serde_json = { version = "1.0", optional = true }
+serde_json = { version = "1.0" }
 rand = { version = "0.8.0", optional = true }
 sha2 = {version = "0.10.9", optional = true}
 base64 = {version = "0.22.1", optional = true}
@@ -35,7 +35,6 @@ cookie = "0.18.1"
 server = ["dioxus/server",
     "dep:axum", 
     "dep:tokio",
-    "dep:serde_json",
     "dep:dotenvy",
     "dep:rand",
     "dep:base64",
