@@ -17,7 +17,7 @@ use rand::{thread_rng, seq::SliceRandom};
 use neo4rs::query;
 
 #[cfg(feature="server")]
-use crate::auth::helpers::{get_current_user, require_auth, handle_token_expired_error};
+use crate::auth::helpers::{get_current_user, require_auth, spotify_api_call};
 
 
 
@@ -53,44 +53,38 @@ pub async fn logout() -> Result<(), ServerFnError> {
 
 #[server(GetSpotifyUserData)]
 pub async fn get_spotify_user_profile() -> Result<SpotifyUserProfile, ServerFnError>{
+    spotify_api_call(|access_token| async move {
+        let client = Client::new();
+        let profile_endpoint = "https://api.spotify.com/v1/me";
 
-
-    let access_token = get_access_token().await?;
-
-    let client = Client::new();
-    let profile_endpoint = "https://api.spotify.com/v1/me";
-
-    match client
-        .get(profile_endpoint)
-        .bearer_auth(access_token)
-        .send()
-        .await
-    {
-        Ok(response) => {
-            if response.status().is_success(){
-                match response.json::<SpotifyUserProfile>().await {
-                    Ok(profile) => Ok(profile),
-                    Err(e) => {
-                        tracing::error!("failed to parse user profile json {}", e);
-                        Err(ServerFnError::ServerError(format!(
-                            "failed to parse spotify profile: {}",e
-                        )))
+        match client
+            .get(profile_endpoint)
+            .bearer_auth(access_token)
+            .send()
+            .await
+        {
+            Ok(response) => {
+                if response.status().is_success(){
+                    match response.json::<SpotifyUserProfile>().await {
+                        Ok(profile) => Ok(profile),
+                        Err(e) => {
+                            tracing::error!("failed to parse user profile json {}", e);
+                            Err((500, format!("failed to parse spotify profile: {}", e)))
+                        }
                     }
+                } else{
+                    let status = response.status().as_u16();
+                    let error_text = response.text().await.unwrap_or_else(|_| "Unknown Error".to_string());
+                    tracing::error!("failed to get user profile from spotify, status:{}, error:{}", status, error_text);
+                    Err((status, error_text))
                 }
-            } else{
-                let status = response.status();
-                let error_text = response.text().await.unwrap_or_else(|_| "Unknown Error".to_string());
-                tracing::error!("failed to get user profile from spotify, status:{}, error:{}", status, error_text);
-
-                Err(ServerFnError::ServerError(format!(
-                    "Spotify API Error ({}): {}", status, error_text)))
+            }
+            Err(e) => {
+                tracing::error!("Network Error while fetching user profile: {}",e);
+                Err((500, format!("Network Error: {}", e)))
             }
         }
-        Err(e) => {
-            tracing::error!("Network Error while fetching user profile: {}",e);
-            Err(ServerFnError::ServerError(format!("Network Error: {}", e)))
-        }
-    }
+    }).await
 }
 
 #[server(GetSpotifyUserId)]
@@ -103,10 +97,7 @@ pub async fn get_spotify_user_id() -> Result<String, ServerFnError>{
 pub async fn get_spotify_user_playlists_page(limit: u32, offset:u32) -> Result<SpotifyPlaylistsResponse, ServerFnError>{
     tracing::info!("Attempting spotify user playlists page offset: {}", offset);
 
-    let mut access_token = get_access_token().await?;
-    let mut retry_count = 0;
-    
-    loop {
+    spotify_api_call(|access_token| async move {
         let client = Client::new();
         let mut playlist_url = reqwest::Url::parse("https://api.spotify.com/v1/me/playlists").unwrap();
         playlist_url.query_pairs_mut()
@@ -127,36 +118,26 @@ pub async fn get_spotify_user_playlists_page(limit: u32, offset:u32) -> Result<S
                                 "Successfully fetched page of {} playlists. Offset: {}",
                                 page_data.items.len(),
                                 page_data.offset);
-                            return Ok(page_data);
+                            Ok(page_data)
                         }
                         Err(e) => {
                             tracing::error!("Failed to parse playlist json: {}", e);
-                            return Err(ServerFnError::ServerError(format!(
-                                "failed to parse spotify playlists: {}",e
-                            )));
+                            Err((500, format!("failed to parse spotify playlists: {}", e)))
                         }
                     }
-                } else if response.status().as_u16() == 401 && retry_count == 0 {
-                    // Token expired, try to refresh
-                    tracing::info!("Access token expired, attempting refresh");
-                    retry_count += 1;
-                    access_token = handle_token_expired_error().await?;
-                    continue; // Retry with new token
                 } else {
-                    let status = response.status();
+                    let status = response.status().as_u16();
                     let error_text = response.text().await.unwrap_or_else(|_| "Unknown Error".to_string());
                     tracing::error!("failed to get user playlists from spotify, status:{}, error:{}", status, error_text);
-
-                    return Err(ServerFnError::ServerError(format!(
-                        "Spotify API Error ({}): {}", status, error_text)));
+                    Err((status, error_text))
                 }
             }
             Err(e) => {
                 tracing::error!("Network Error while fetching user playlists: {}",e);
-                return Err(ServerFnError::ServerError(format!("Network Error: {}", e)));
+                Err((500, format!("Network Error: {}", e)))
             }
         }
-    }
+    }).await
 }
 
 #[server(GetSpotifyUserPlaylistsAll)]
@@ -304,101 +285,98 @@ pub async fn get_spotify_playlist_tracks_all(playlist_id: String) -> Result<Vec<
 pub async fn get_spotify_playlist_tracks_page(playlist_id: String, limit: u32, offset:u32) -> Result<SpotifyPlaylistTrackResponse, ServerFnError>{
     tracing::info!("Attempting spotify playlist tracks page offset: {}", offset);
 
-    let access_token = get_access_token().await?;
+    spotify_api_call(|access_token| {
+        let playlist_id = playlist_id.clone();
+        async move {
+        const FIELDS: &str = "items(track(id,name,uri,artists(id,name))),limit,offset,total,next";
 
-    const FIELDS: &str = "items(track(id,name,uri,artists(id,name))),limit,offset,total,next";
+        let client = Client::new();
+        let mut tracks_url = reqwest::Url::parse(
+            format!("https://api.spotify.com/v1/playlists/{}/tracks",playlist_id).as_str()).unwrap();
+        tracks_url.query_pairs_mut()
+            .append_pair("offset", &offset.to_string())
+            .append_pair("limit", &limit.to_string())
+            .append_pair("fields", FIELDS);
 
-    let client = Client::new();
-    let mut tracks_url = reqwest::Url::parse(
-        format!("https://api.spotify.com/v1/playlists/{}/tracks",playlist_id).as_str()).unwrap();
-    tracks_url.query_pairs_mut()
-        .append_pair("offset", &offset.to_string())
-        .append_pair("limit", &limit.to_string())
-        .append_pair("fields", FIELDS);
-
-
-    match client
-        .get(tracks_url)
-        .bearer_auth(access_token)
-        .send()
-        .await
-    {
-        Ok(response) => {
-            if response.status().is_success(){
-                match response.json::<SpotifyPlaylistTrackResponse>().await {
-                    Ok(page_data) => {
-                        tracing::info!(
-                            "Successfully fetched page of {} tracks. Offset: {}",
-                            page_data.items.len(),
-                            page_data.offset);
-                        Ok(page_data)
+        match client
+            .get(tracks_url)
+            .bearer_auth(access_token)
+            .send()
+            .await
+        {
+            Ok(response) => {
+                if response.status().is_success(){
+                    match response.json::<SpotifyPlaylistTrackResponse>().await {
+                        Ok(page_data) => {
+                            tracing::info!(
+                                "Successfully fetched page of {} tracks. Offset: {}",
+                                page_data.items.len(),
+                                page_data.offset);
+                            Ok(page_data)
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to parse playlist json: {}", e);
+                            Err((500, format!("failed to parse spotify playlists tracks: {}", e)))
+                        }
                     }
-                    Err(e) => {
-                        tracing::error!("Failed to parse playlist json: {}", e);
-                        Err(ServerFnError::ServerError(format!(
-                            "failed to parse spotify playlists tracks: {}",e
-                        )))
-                    }
+                } else{
+                    let status = response.status().as_u16();
+                    let error_text = response.text().await.unwrap_or_else(|_| "Unknown Error".to_string());
+                    tracing::error!("failed to get playlist tracks from spotify, status:{}, error:{}", status, error_text);
+                    Err((status, error_text))
                 }
-            } else{
-                let status = response.status();
-                let error_text = response.text().await.unwrap_or_else(|_| "Unknown Error".to_string());
-                tracing::error!("failed to get playlist tracks from spotify, status:{}, error:{}", status, error_text);
-
-                Err(ServerFnError::ServerError(format!(
-                    "Spotify API Error ({}): {}", status, error_text)))
+            }
+            Err(e) => {
+                tracing::error!("Network Error while fetching user playlists: {}",e);
+                Err((500, format!("Network Error: {}", e)))
             }
         }
-        Err(e) => {
-            tracing::error!("Network Error while fetching user playlists: {}",e);
-            Err(ServerFnError::ServerError(format!("Network Error: {}", e)))
         }
-    }
+    }).await
 }
 
 #[server(GetSpotifyPlaylist)]
 pub async fn get_spotify_playlist(playlist_id: String) -> Result<SpotifyPlaylistItem, ServerFnError> {
     tracing::info!("Attempting to get playlist details for ID: {}", playlist_id);
     
-    let access_token = get_access_token().await?;
-    
-    let client = Client::new();
-    let playlist_url = format!("https://api.spotify.com/v1/playlists/{}", playlist_id);
-    
-    match client
-        .get(&playlist_url)
-        .bearer_auth(access_token)
-        .send()
-        .await
-    {
-        Ok(response) => {
-            if response.status().is_success() {
-                match response.json::<SpotifyPlaylistItem>().await {
-                    Ok(playlist) => {
-                        tracing::info!("Successfully fetched playlist: {}", playlist.name);
-                        Ok(playlist)
+    spotify_api_call(|access_token| {
+        let playlist_id = playlist_id.clone();
+        async move {
+        let client = Client::new();
+        let playlist_url = format!("https://api.spotify.com/v1/playlists/{}", playlist_id);
+        
+        match client
+            .get(&playlist_url)
+            .bearer_auth(access_token)
+            .send()
+            .await
+        {
+            Ok(response) => {
+                if response.status().is_success() {
+                    match response.json::<SpotifyPlaylistItem>().await {
+                        Ok(playlist) => {
+                            tracing::info!("Successfully fetched playlist: {}", playlist.name);
+                            Ok(playlist)
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to parse playlist json: {}", e);
+                            Err((500, format!("Failed to parse Spotify playlist: {}", e)))
+                        }
                     }
-                    Err(e) => {
-                        tracing::error!("Failed to parse playlist json: {}", e);
-                        Err(ServerFnError::ServerError(format!(
-                            "Failed to parse Spotify playlist: {}", e
-                        )))
-                    }
+                } else {
+                    let status = response.status().as_u16();
+                    let error_text = response.text().await.unwrap_or_else(|_| "Unknown Error".to_string());
+                    tracing::error!("Failed to get playlist from Spotify, status:{}, error:{}", status, error_text);
+                    Err((status, error_text))
                 }
-            } else {
-                let status = response.status();
-                let error_text = response.text().await.unwrap_or_else(|_| "Unknown Error".to_string());
-                tracing::error!("Failed to get playlist from Spotify, status:{}, error:{}", status, error_text);
-                
-                Err(ServerFnError::ServerError(format!(
-                    "Spotify API Error ({}): {}", status, error_text)))
+            }
+            Err(e) => {
+                tracing::error!("Network Error while fetching playlist: {}", e);
+                Err((500, format!("Network Error: {}", e)))
             }
         }
-        Err(e) => {
-            tracing::error!("Network Error while fetching playlist: {}", e);
-            Err(ServerFnError::ServerError(format!("Network Error: {}", e)))
         }
-    }
+    }).await
 }
 
 #[server(ShuffleAndSavePlaylist)] // Reverting to this name
@@ -450,68 +428,88 @@ pub async fn shuffle_and_save_new_playlist(
 
 
         // 4. Create a New Playlist
-        let access_token = match get_access_token().await { // Get token again for subsequent calls
-            Ok(token) => token,
-            Err(e) => return Err(e),
-        };
-        let client = Client::new();
         let new_playlist_name = format!("{} - TRUE SHUFFLED", original_playlist_name);
+        let created_playlist_data: SpotifyPlaylistItem = spotify_api_call(|access_token| {
+            let user_id = user_id.clone();
+            let new_playlist_name = new_playlist_name.clone();
+            let original_playlist_name = original_playlist_name.clone();
+            async move {
+                #[derive(serde::Serialize)]
+                struct CreatePlaylistPayload<'a> { name: &'a str, public: bool, description: String }
+                let create_payload = CreatePlaylistPayload {
+                    name: &new_playlist_name,
+                    public: false,
+                    description: format!(
+                        "A true random shuffle of '{}'!",
+                        original_playlist_name
+                    ),
+                };
+                let create_playlist_url = format!("https://api.spotify.com/v1/users/{}/playlists", user_id);
+                tracing::info!("API: Creating new playlist: {}", new_playlist_name);
 
-        #[derive(serde::Serialize)]
-        struct CreatePlaylistPayload<'a> { name: &'a str, public: bool, description: String }
-        let create_payload = CreatePlaylistPayload {
-            name: &new_playlist_name,
-            public: false,
-            description: format!(
-                "A true random shuffle of '{}'!",
-                original_playlist_name
-            ),
-        };
-        let create_playlist_url = format!("https://api.spotify.com/v1/users/{}/playlists", user_id);
-        tracing::info!("API: Creating new playlist: {}", new_playlist_name);
-
-        let created_playlist_data: SpotifyPlaylistItem = match client
-            .post(&create_playlist_url)
-            .bearer_auth(access_token.clone())
-            .json(&create_payload)
-            .send().await {
-                // Explicit match for Result<reqwest::Response, reqwest::Error>
-                Ok(response) => {
-                    if response.status().is_success() || response.status().as_u16() == 201 {
-                        match response.json::<SpotifyPlaylistItem>().await {
-                            Ok(data) => data,
-                            Err(e) => return Err(ServerFnError::ServerError(format!("API: Parse new playlist response error: {}", e))),
+                let client = Client::new();
+                match client
+                    .post(&create_playlist_url)
+                    .bearer_auth(access_token)
+                    .json(&create_payload)
+                    .send().await {
+                        Ok(response) => {
+                            if response.status().is_success() || response.status().as_u16() == 201 {
+                                match response.json::<SpotifyPlaylistItem>().await {
+                                    Ok(data) => Ok(data),
+                                    Err(e) => Err((500, format!("API: Parse new playlist response error: {}", e))),
+                                }
+                            } else {
+                                let status = response.status().as_u16();
+                                let error_text = response.text().await.unwrap_or_default();
+                                Err((status, format!("API: Spotify error creating playlist: {}", error_text)))
+                            }
                         }
-                    } else {
-                        let s = response.status(); let t = response.text().await.unwrap_or_default();
-                        return Err(ServerFnError::ServerError(format!("API: Spotify error {} creating playlist: {}", s, t)));
+                        Err(e) => Err((500, format!("API: Network error creating playlist: {}", e))),
                     }
-                }
-                Err(e) => return Err(ServerFnError::ServerError(format!("API: Network error creating playlist: {}", e))),
-            };
+            }
+        }).await?;
         let new_playlist_id = created_playlist_data.id.clone();
         tracing::info!("API: New playlist created '{}' (ID: {})", new_playlist_name, new_playlist_id);
 
         // 5. Add Shuffled Tracks to the New Playlist (in batches)
         if !track_uris.is_empty() {
-            let add_tracks_url_base = format!("https://api.spotify.com/v1/playlists/{}/tracks", new_playlist_id);
             for chunk_of_uris in track_uris.chunks(100) {
-                 #[derive(serde::Serialize)]
-                struct AddTracksPayload<'a> {
-                    uris: &'a [String],
-                }
-                let add_payload = AddTracksPayload {
-                    uris: chunk_of_uris,
-                };
-                tracing::info!(
-                    "API: Adding {} tracks to new playlist ID {}",
-                    chunk_of_uris.len(),
-                    new_playlist_id
-                );
-                match client.post(&add_tracks_url_base).bearer_auth(access_token.clone()).json(&add_payload).send().await {
-                    Ok(_response) => { /* Check status */ }
-                    Err(e) => return Err(ServerFnError::ServerError(format!("API: Network error adding tracks: {}",e))),
-                }
+                let chunk_vec: Vec<String> = chunk_of_uris.to_vec();
+                spotify_api_call(|access_token| {
+                    let new_playlist_id = new_playlist_id.clone();
+                    let chunk_vec = chunk_vec.clone();
+                    async move {
+                        #[derive(serde::Serialize)]
+                        struct AddTracksPayload {
+                            uris: Vec<String>,
+                        }
+                        let add_payload = AddTracksPayload {
+                            uris: chunk_vec.clone(),
+                        };
+                        let add_tracks_url = format!("https://api.spotify.com/v1/playlists/{}/tracks", new_playlist_id);
+                        tracing::info!(
+                            "API: Adding {} tracks to new playlist ID {}",
+                            chunk_vec.len(),
+                            new_playlist_id
+                        );
+                        
+                        let client = Client::new();
+                        match client.post(&add_tracks_url).bearer_auth(access_token).json(&add_payload).send().await {
+                            Ok(response) => {
+                                if response.status().is_success() {
+                                    Ok(())
+                                } else {
+                                    let status = response.status().as_u16();
+                                    let error_text = response.text().await.unwrap_or_default();
+                                    Err((status, format!("API: Error adding tracks: {}", error_text)))
+                                }
+                            }
+                            Err(e) => Err((500, format!("API: Network error adding tracks: {}", e))),
+                        }
+                    }
+                }).await?;
+                
                 if track_uris.len() > 100 && chunk_of_uris.len() == 100 { // Avoid sleep if only one chunk or last small chunk
                     tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
                 }
@@ -530,6 +528,7 @@ pub async fn shuffle_and_save_new_playlist(
                         tracing::info!("API: Copying image from original playlist: {}", original_image_url);
                         
                         // Fetch the image from the URL
+                        let client = Client::new();
                         match client.get(original_image_url).send().await {
                             Ok(img_response) => {
                                 if img_response.status().is_success() {
@@ -540,27 +539,41 @@ pub async fn shuffle_and_save_new_playlist(
                                             let base64_img = STANDARD.encode(img_bytes);
                                             
                                             // Call Spotify API to update playlist image
-                                            let upload_image_url = format!("https://api.spotify.com/v1/playlists/{}/images", new_playlist_id);
-                                            
-                                            match client
-                                                .put(&upload_image_url)
-                                                .bearer_auth(access_token.clone())
-                                                .header("Content-Type", "image/jpeg")
-                                                .body(base64_img)
-                                                .send()
-                                                .await
-                                            {
-                                                Ok(upload_response) => {
-                                                    if upload_response.status().is_success() {
-                                                        tracing::info!("API: Successfully copied image to new playlist");
-                                                    } else {
-                                                        let status = upload_response.status();
-                                                        let err_text = upload_response.text().await.unwrap_or_default();
-                                                        tracing::error!("API: Failed to upload image: {} - {}", status, err_text);
+                                            let upload_result: Result<(), ServerFnError> = spotify_api_call(|access_token| {
+                                                let new_playlist_id = new_playlist_id.clone();
+                                                let base64_img = base64_img.clone();
+                                                async move {
+                                                    let upload_image_url = format!("https://api.spotify.com/v1/playlists/{}/images", new_playlist_id);
+                                                    let client = Client::new();
+                                                    match client
+                                                        .put(&upload_image_url)
+                                                        .bearer_auth(access_token)
+                                                        .header("Content-Type", "image/jpeg")
+                                                        .body(base64_img)
+                                                        .send()
+                                                        .await
+                                                    {
+                                                        Ok(upload_response) => {
+                                                            if upload_response.status().is_success() {
+                                                                tracing::info!("API: Successfully copied image to new playlist");
+                                                                Ok(())
+                                                            } else {
+                                                                let status = upload_response.status().as_u16();
+                                                                let err_text = upload_response.text().await.unwrap_or_default();
+                                                                Err((status, format!("API: Failed to upload image: {}", err_text)))
+                                                            }
+                                                        },
+                                                        Err(e) => {
+                                                            Err((500, format!("API: Network error uploading image: {}", e)))
+                                                        }
                                                     }
-                                                },
+                                                }
+                                            }).await;
+                                            
+                                            match upload_result {
+                                                Ok(_) => {},
                                                 Err(e) => {
-                                                    tracing::error!("API: Network error uploading image: {}", e);
+                                                    tracing::error!("API: Failed to upload image: {}", e);
                                                 }
                                             }
                                         },

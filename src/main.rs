@@ -10,8 +10,7 @@ mod server;
 mod auth;
 #[cfg(feature="server")]
 mod db;
-#[cfg(feature="server")]
-mod middleware;
+
 
 
 pub mod api;

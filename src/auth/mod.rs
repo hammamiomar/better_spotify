@@ -190,4 +190,34 @@ pub mod helpers {
         get_current_user().await
             .ok_or_else(|| ServerFnError::ServerError("Authentication required".to_string()))
     }
+
+    /// Generic Spotify API call wrapper with automatic token refresh
+    pub async fn spotify_api_call<F, Fut, T>(
+        api_call: F,
+    ) -> Result<T, ServerFnError>
+    where
+        F: Fn(String) -> Fut + Clone,
+        Fut: std::future::Future<Output = Result<T, (u16, String)>>,
+    {
+        let mut access_token = get_valid_access_token().await?;
+        let mut retry_count = 0;
+        
+        loop {
+            match api_call(access_token.clone()).await {
+                Ok(result) => return Ok(result),
+                Err((status_code, error_msg)) => {
+                    if status_code == 401 && retry_count == 0 {
+                        tracing::info!("Access token expired, attempting refresh");
+                        retry_count += 1;
+                        access_token = handle_token_expired_error().await?;
+                        continue;
+                    } else {
+                        return Err(ServerFnError::ServerError(format!(
+                            "Spotify API Error ({}): {}", status_code, error_msg
+                        )));
+                    }
+                }
+            }
+        }
+    }
 }
